@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ailo 网页聊天</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-base: #0d0d12;
+      --bg-elevated: #16161c;
+      --bg-surface: #1c1c24;
+      --bg-muted: #252530;
+      --accent: #7c9eff;
+      --accent-soft: rgba(124, 158, 255, 0.15);
+      --accent-user: #5b8def;
+      --accent-user-soft: rgba(91, 141, 239, 0.2);
+      --text-primary: #f0f0f5;
+      --text-secondary: #8b8b9a;
+      --text-muted: #5c5c6b;
+      --border: rgba(255,255,255,0.06);
+      --border-focus: rgba(124, 158, 255, 0.4);
+      --success: #4ade80;
+      --error: #f87171;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --shadow-sm: 0 2px 8px rgba(0,0,0,0.2);
+      --shadow-md: 0 4px 20px rgba(0,0,0,0.2);
+    }
+
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      background: var(--bg-elevated);
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    h1 {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status {
+      font-size: 13px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+    }
+
+    .status-dot.disconnected {
+      background: var(--error);
+    }
+
+    .user-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-muted);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .user-badge svg {
+      width: 16px;
+      height: 16px;
+      opacity: 0.7;
+    }
+
+    #chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    #chat-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #chat-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #chat-container::-webkit-scrollbar-thumb {
+      background: var(--bg-muted);
+      border-radius: 4px;
+    }
+
+    #chat-container::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 14px 18px;
+      border-radius: var(--radius-lg);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 15px;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, var(--accent-user-soft) 0%, rgba(91, 141, 239, 0.08) 100%);
+      border: 1px solid rgba(91, 141, 239, 0.25);
+      color: var(--text-primary);
+      border-bottom-right-radius: 6px;
+    }
+
+    .message.ailo {
+      align-self: flex-start;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      border-bottom-left-radius: 6px;
+    }
+
+    .message .sender {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .message.user .sender {
+      color: var(--accent-user);
+    }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
+
+    .empty-state svg {
+      width: 56px;
+      height: 56px;
+      margin-bottom: 16px;
+      opacity: 0.4;
+    }
+
+    .empty-state p {
+      font-size: 15px;
+    }
+
+    .load-more-btn {
+      display: block;
+      margin: 0 auto 16px;
+      padding: 8px 20px;
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .load-more-btn:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    .load-more-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #input-container {
+      background: var(--bg-elevated);
+      padding: 20px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    #message-input {
+      flex: 1;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      color: var(--text-primary);
+      font-size: 15px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #message-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    #message-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(124, 158, 255, 0.1);
+    }
+
+    #send-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 14px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s, transform: 0.1s;
+    }
+
+    #send-btn:hover {
+      opacity: 0.9;
+    }
+
+    #send-btn:active {
+      transform: scale(0.98);
+    }
+
+    #send-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .typing {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 14px 18px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      align-self: flex-start;
+      display: none;
+    }
+
+    .typing.active {
+      display: flex;
+    }
+
+    .typing span {
+      width: 6px;
+      height: 6px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out;
+    }
+
+    .typing span:nth-child(1) { animation-delay: 0s; }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Setup Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-overlay.hidden {
+      display: none;
+    }
+
+    .modal {
+      background: var(--bg-elevated);
+      border-radius: var(--radius-xl);
+      padding: 36px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-md);
+    }
+
+    .modal h2 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .modal p {
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      line-height: 1.6;
+      font-size: 15px;
+    }
+
+    .modal input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      color: var(--text-primary);
+      font-size: 16px;
+      outline: none;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+    .modal input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .modal .hint {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+
+    .modal button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 14px 32px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .modal button:hover {
+      opacity: 0.9;
+    }
+
+    .modal button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <!-- 设置称呼弹窗 -->
+  <div class="modal-overlay" id="setup-modal">
+    <div class="modal">
+      <h2>欢迎使用 Ailo 网页聊天</h2>
+      <p>请告诉我应该如何称呼你？昵称仅保存在本设备浏览器中。</p>
+      <input type="text" id="user-name-input" placeholder="请输入你的称呼" maxlength="20">
+      <p class="hint">例如：老板、主人、大侠、居士、师父 等</p>
+      <button id="setup-btn" disabled>确认</button>
+    </div>
+  </div>
+
+  <header>
+    <h1>Ailo 网页聊天</h1>
+    <div class="header-right">
+      <div class="status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">连接中...</span>
+      </div>
+      <div class="user-badge" id="user-badge" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span id="user-name-display"></span>
+      </div>
+    </div>
+  </header>
+
+  <div id="chat-container">
+    <div class="empty-state" id="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+      <p>发送消息开始对话</p>
+    </div>
+    <div class="typing" id="typing-indicator">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  </div>
+
+  <div id="input-container">
+    <textarea id="message-input" placeholder="输入消息，按 Enter 发送" rows="1"></textarea>
+    <button id="send-btn" title="发送 (Enter)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+      发送
+    </button>
+  </div>
+
+  <script>
+    const chatContainer = document.getElementById('chat-container');
+    const emptyState = document.getElementById('empty-state');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const typingIndicator = document.getElementById('typing-indicator');
+
+    // Setup modal elements
+    const setupModal = document.getElementById('setup-modal');
+    const userNameInput = document.getElementById('user-name-input');
+    const setupBtn = document.getElementById('setup-btn');
+    const userBadge = document.getElementById('user-badge');
+    const userNameDisplay = document.getElementById('user-name-display');
+
+    const STORAGE_KEY = 'ailo_webchat_chat';
+    const STORAGE_KEY_NICKNAME = 'ailo_webchat_nickname';
+    const MAX_MESSAGES = 200;
+
+    let ws = null;
+    let reconnectTimer = null;
+    let userName = null;
+
+    function loadNickname() {
+      try {
+        return localStorage.getItem(STORAGE_KEY_NICKNAME) || null;
+      } catch { return null; }
+    }
+
+    function saveNickname(name) {
+      try {
+        localStorage.setItem(STORAGE_KEY_NICKNAME, name);
+      } catch (e) { console.warn('saveNickname failed', e); }
+    }
+
+    function initNicknameUI() {
+      userName = loadNickname();
+      if (userName) {
+        userNameDisplay.textContent = userName;
+        userBadge.style.display = 'inline-flex';
+        setupModal.classList.add('hidden');
+      } else {
+        setupModal.classList.remove('hidden');
+        userNameInput.focus();
+      }
+    }
+
+    function loadFromStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch { return []; }
+    }
+
+    function saveToStorage(messages) {
+      try {
+        const trimmed = messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+      } catch (e) { console.warn('saveToStorage failed', e); }
+    }
+
+    // Enable/disable setup button based on input
+    userNameInput.addEventListener('input', () => {
+      setupBtn.disabled = userNameInput.value.trim().length === 0;
+    });
+
+    // Handle setup submission - 昵称仅保存在前端 localStorage
+    setupBtn.addEventListener('click', () => {
+      const name = userNameInput.value.trim();
+      if (!name) return;
+
+      saveNickname(name);
+      userName = name;
+      userNameDisplay.textContent = name;
+      userBadge.style.display = 'inline-flex';
+      setupModal.classList.add('hidden');
+    });
+
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+      // 先设置 message 处理器，确保不丢失消息
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'reply') {
+            hideTyping();
+            addMessage('ailo', data.text);
+          }
+        } catch (err) {
+          console.error('Failed to parse message:', err);
+        }
+      };
+
+      ws.onopen = () => {
+        statusDot.className = 'status-dot connected';
+        statusText.textContent = '已连接';
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        renderFromStorage();
+      };
+
+      ws.onclose = () => {
+        statusDot.className = 'status-dot disconnected';
+        statusText.textContent = '连接断开';
+        // 自动重连
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => {
+        statusDot.className = 'status-dot disconnected';
+        statusText.textContent = '连接错误';
+      };
+    }
+
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+      appendAndSave('user', text);
+      messageInput.value = '';
+      showTyping();
+
+      ws.send(JSON.stringify({ type: 'chat', text, participantName: userName || '用户' }));
+    }
+
+    function appendAndSave(sender, text) {
+      emptyState.style.display = 'none';
+      const msgs = loadFromStorage();
+      msgs.push({ sender, text, timestamp: Date.now() });
+      saveToStorage(msgs);
+
+      const div = document.createElement('div');
+      div.className = `message ${sender}`;
+      const senderLabel = sender === 'user' ? (userName || '你') : 'Ailo';
+      div.innerHTML = `<div class="sender">${senderLabel}</div>${escapeHtml(text)}`;
+      chatContainer.insertBefore(div, typingIndicator);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function addMessage(sender, text) {
+      appendAndSave(sender, text);
+    }
+
+    function renderFromStorage() {
+      const msgs = loadFromStorage();
+      if (!msgs.length) return;
+      emptyState.style.display = 'none';
+      chatContainer.querySelectorAll('.message').forEach(el => el.remove());
+      document.getElementById('load-more-btn')?.remove();
+      for (const m of msgs) {
+        const div = document.createElement('div');
+        div.className = `message ${m.sender}`;
+        const senderLabel = m.sender === 'user' ? (userName || '你') : 'Ailo';
+        div.innerHTML = `<div class="sender">${senderLabel}</div>${escapeHtml(m.text ?? m.content ?? '')}`;
+        chatContainer.insertBefore(div, typingIndicator);
+      }
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function showTyping() {
+      typingIndicator.classList.add('active');
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function hideTyping() {
+      typingIndicator.classList.remove('active');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Event listeners
+    sendBtn.addEventListener('click', sendMessage);
+
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    messageInput.addEventListener('input', () => {
+      // Auto-resize
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
+    });
+
+    // 页面加载时：初始化昵称 UI，渲染本地历史，连接 WebSocket
+    initNicknameUI();
+    renderFromStorage();
+    connect();
+  </script>
+</body>
+</html>
