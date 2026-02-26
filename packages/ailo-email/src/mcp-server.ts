@@ -18,6 +18,35 @@ const actionSchema = z.enum([
   "get_attachment",
 ]);
 
+type EmailToolArgs = {
+  action: z.infer<typeof actionSchema>;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject?: string;
+  body?: string;
+  html?: string;
+  uid?: number;
+  uids?: number[];
+  folder?: string;
+  from_folder?: string;
+  limit?: number;
+  offset?: number;
+  unread_only?: boolean;
+  read?: boolean;
+  query?: string;
+  from?: string;
+  to_search?: string;
+  since?: string;
+  until?: string;
+  filename?: string;
+  attachments?: Array<{
+    filename: string;
+    content: string;
+    contentType?: string;
+  }>;
+};
+
 function ok(text: string) {
   return { content: [{ type: "text" as const, text }], isError: false };
 }
@@ -75,7 +104,7 @@ export function createEmailMcpServer(handler: EmailHandler): McpServer {
           .optional(),
       },
     },
-    async (args) => {
+    async (args: EmailToolArgs) => {
       try {
         const a = args.action;
         switch (a) {

@@ -11,7 +11,10 @@ runEndpoint({
   handler,
   displayName: "网页聊天",
   caps: ["message", "tool_execute"],
-  blueprints: [process.env.AILO_BLUEPRINT_WEBCHAT ?? "blueprints/webchat-channel.blueprint.md"],
+  blueprints: [
+    process.env.BLUEPRINT_WEBCHAT_URL ??
+      "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/webchat-channel.blueprint.md",
+  ],
   instructions: "网页聊天通道。用户通过 Web 界面对话。",
   toolHandlers: {
     send: async (args: Record<string, unknown>) => {

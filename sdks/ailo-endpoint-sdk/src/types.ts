@@ -31,8 +31,10 @@ export function mediaPart(
 export type ContextTag = {
   kind: string;
   value: string;
-  streamKey: boolean;
-  routing?: boolean;
+  /** 参与流分组，同一组消息共享历史、一起归纳 */
+  groupWith: boolean;
+  /** 回复/控制时传给工具的参数，不参与语义展示和向量嵌入 */
+  passToTool?: boolean;
 };
 
 // ─── Tool capability declaration ─────────────────────────────────────────────
@@ -54,9 +56,8 @@ export const CAP_SIGNAL = "signal";
 
 // ─── Inbound message types (endpoint → server) ────────────────────────────────
 
-/** Message sent via endpoint.accept */
+/** Message sent via endpoint.accept. Stream grouping and reply routing via contextTags (groupWith, passToTool). */
 export type AcceptMessage = {
-  chatId: string;
   content: ContentPart[];
   contextTags: ContextTag[];
   requiresResponse?: boolean;

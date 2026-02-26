@@ -17,10 +17,11 @@
     "src/console.html"
   ],
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@lmcl/ailo-endpoint-sdk": "*",
     "dotenv": "^16.4.5",
     "ws": "^8.18.0",
-    "zod": "^3.23.0"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

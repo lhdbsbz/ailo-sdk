@@ -19,12 +19,11 @@ Ailo 邮件通道 MCP：IMAP 收信 + SMTP 发信。
 
 ## 在 Ailo 中添加
 
-通过 `mcp_manage` 工具创建。**name 只能含字母、汉字、下划线**（无标点无数字），推荐纯英文尽量短：
+通过 **Ailo 端点管理后台** 配置并添加（与 MCP 分离，不走 mcp_manage）：
 
-```
-mcp_manage(action=create, name="email", command="npx", args=["@lmcl/ailo-mcp-email"], env={IMAP_HOST: "imap.qq.com", IMAP_USER: "xxx", IMAP_PASSWORD: "xxx"})
-mcp_manage(action=start, name="email")
-```
+1. 在 Ailo 管理端「端点密钥」创建 API Key
+2. 在「端点配置」添加端点：endpoint_id=email，command=npx，args=[@lmcl/ailo-mcp-email]，选择密钥，env 填入 IMAP_HOST、IMAP_USER、IMAP_PASSWORD 等
+3. 启用后由 Ailo 自动拉起
 
 ## 本地开发
 

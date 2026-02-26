@@ -2,7 +2,7 @@
  * bootstrap.ts — Helpers for launching endpoint processes.
  *
  * Feishu, webchat, email and similar "message-channel" endpoints are:
- *  1. Launched by Ailo (process manager injects AILO_WS_URL + AILO_API_KEY + AILO_ENDPOINT_ID).
+ *  1. Launched by Ailo endpoint manager (injects AILO_WS_URL + AILO_API_KEY + AILO_ENDPOINT_ID).
  *  2. Connect to Ailo via the endpoint protocol using the injected API key.
  *  3. Optionally register tool handlers that respond to tool_request frames.
  *
@@ -11,11 +11,18 @@
  */
 
 import { EndpointClient } from "./endpoint-client.js";
-import type { AcceptMessage, HealthStatus, ToolHandler, ToolCapability } from "./types.js";
+import type {
+  AcceptMessage,
+  EndpointStorage,
+  HealthStatus,
+  ToolHandler,
+  ToolCapability,
+} from "./types.js";
 
 export interface EndpointContext {
   /** Submit a message (or perception signal) to Ailo */
   accept(msg: AcceptMessage): Promise<void>;
+  storage: EndpointStorage;
   reportHealth(status: HealthStatus, detail?: string): void;
   log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void;
   sendSignal(signal: string, data?: unknown): void;
@@ -101,6 +108,7 @@ export function runEndpoint(config: EndpointConfig): void {
   (async () => {
     const ctx: EndpointContext = {
       accept: (msg) => client.accept(msg),
+      storage: client,
       reportHealth: (status, detail) => client.reportHealth(status, detail),
       log: (level, message, data) => client.sendLog(level, message, data),
       sendSignal: (signal, data) => client.sendSignal(signal, data),

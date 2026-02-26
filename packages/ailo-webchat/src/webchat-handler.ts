@@ -89,9 +89,9 @@ export class WebchatHandler implements EndpointHandler {
     const name = participantName?.trim() || "用户";
 
     const tags: ContextTag[] = [
-      { kind: "conv_type", value: "私聊", streamKey: false },
-      { kind: "chat_id", value: "console", streamKey: true, routing: true },
-      { kind: "participant", value: name, streamKey: false },
+      { kind: "conv_type", value: "私聊", groupWith: false },
+      { kind: "chat_id", value: "console", groupWith: true, passToTool: true },
+      { kind: "participant", value: name, groupWith: false },
     ];
 
     const msg: AcceptMessage = {

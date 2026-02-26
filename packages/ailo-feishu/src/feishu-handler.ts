@@ -15,18 +15,14 @@ import { getWorkDir } from "@lmcl/ailo-endpoint-sdk";
 import {
   type CacheEntry,
   type ChatInfo,
-  type FeishuChatIdEvent,
   type FeishuConfig,
   type FeishuMessageEvent,
   type FeishuMention,
-  type FeishuRecalledEvent,
-  type FeishuReactionEvent,
   MEDIA_MESSAGE_CONFIG,
-  NEGATIVE_CACHE_TTL,
   STALE_MESSAGE_THRESHOLD_MS,
   type UserInfo,
 } from "./feishu-types.js";
-import type { FeishuAttachment, OnChatId } from "./feishu-types.js";
+import type { FeishuAttachment } from "./feishu-types.js";
 import {
   adaptMarkdownForFeishu,
   convertMarkdownTablesToCodeBlock,
@@ -36,16 +32,12 @@ import {
   streamToBuffer,
 } from "./feishu-utils.js";
 
-export type { FeishuConfig, FeishuAttachment, OnChatId } from "./feishu-types.js";
+export type { FeishuConfig, FeishuAttachment } from "./feishu-types.js";
 
 export class FeishuHandler implements EndpointHandler {
   private client: Lark.Client;
   private wsClient: Lark.WSClient | null = null;
   private ctx: EndpointContext | null = null;
-  private onP2PChatEntered: OnChatId | null = null;
-  private onBotAddedToGroup: OnChatId | null = null;
-  private onBotRemovedFromGroup: OnChatId | null = null;
-  private onMessageRead: ((data: unknown) => void) | null = null;
 
   private botOpenId: string = "";
   private mentionNameToId = new Map<string, string>();
@@ -55,10 +47,6 @@ export class FeishuHandler implements EndpointHandler {
   private externalUserLabels = new Map<string, string>();
   /** 串行化外部用户持久化，避免并发 getData→parse→setData 导致互相覆盖、数据丢失 */
   private externalUserSaveQueue: Promise<void> = Promise.resolve();
-
-  // messageId → 消息元数据映射缓存（供撤回/Reaction 等事件查找）
-  private msgMetaMap = new Map<string, { chatId: string; senderId: string; senderName: string }>();
-  private readonly MSG_META_MAP_MAX = 2000;
 
   // 缓存过期时间：24小时
   private readonly CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -130,166 +118,6 @@ export class FeishuHandler implements EndpointHandler {
       });
   }
 
-  async fetchDocRawContent(url: string): Promise<string | null> {
-    return this.fetchDocWithImageRefs(url);
-  }
-
-  async fetchDocWithImageRefs(url: string): Promise<string | null> {
-    try {
-      const parsed = new URL(url);
-      const pathParts = parsed.pathname.split("/").filter(Boolean);
-      if (pathParts.length < 2) {
-        this._log("warn", "fetchDocWithImageRefs: invalid URL path", { url });
-        return null;
-      }
-      const type = pathParts[0];
-      const id = pathParts[1];
-      if (!id) {
-        this._log("warn", "fetchDocWithImageRefs: missing doc id", { url });
-        return null;
-      }
-
-      if (type === "docx") {
-        const content = await this.fetchDocxWithImageRefs(id);
-        if (content !== null) return content;
-        return this.fetchDocxRawContent(id);
-      }
-
-      if (type === "doc") {
-        return this.fetchDocRawContentLegacy(id);
-      }
-
-      if (type === "docs") {
-        const docxContent = await this.fetchDocxWithImageRefs(id);
-        if (docxContent !== null) return docxContent;
-        const docContent = await this.fetchDocRawContentLegacy(id);
-        if (docContent !== null) return docContent;
-        this._log("warn", "fetchDocWithImageRefs docs failed for both APIs");
-        return null;
-      }
-
-      this._log("warn", "fetchDocWithImageRefs: unsupported doc type", { type });
-      return null;
-    } catch (err) {
-      this._log("warn", "fetchDocWithImageRefs error", { err: String(err) });
-      return null;
-    }
-  }
-
-  private async fetchDocxRawContent(documentId: string): Promise<string | null> {
-    const res = (await this.client.request({
-      method: "GET",
-      url: `/open-apis/docx/v1/documents/${documentId}/raw_content`,
-      data: {},
-    })) as { data?: { content?: string }; code?: number };
-    if (res?.code !== 0) {
-      this._log("warn", "fetchDocxRawContent failed", { code: res?.code });
-      return null;
-    }
-    return res.data?.content ?? null;
-  }
-
-  private async fetchDocRawContentLegacy(documentId: string): Promise<string | null> {
-    const res = (await this.client.request({
-      method: "GET",
-      url: `/open-apis/doc/v2/${documentId}/raw_content`,
-      data: {},
-    })) as { data?: { content?: string }; code?: number };
-    if (res?.code !== 0) {
-      this._log("warn", "fetchDocRawContentLegacy failed", { code: res?.code });
-      return null;
-    }
-    return res.data?.content ?? null;
-  }
-
-  private async fetchDocxWithImageRefs(documentId: string): Promise<string | null> {
-    type BlockItem = {
-      block_type?: number;
-      block_id?: string;
-      text?: { text?: string };
-      image?: { file_token?: string };
-      paragraph?: { elements?: Array<{ text_run?: { text?: string }; file?: { file_token?: string } }> };
-    };
-    type BlocksRes = { data?: { items?: BlockItem[]; page_token?: string; has_more?: boolean }; code?: number };
-    type TmpUrlRes = {
-      data?: { tmp_download_urls?: Array<{ file_token?: string; tmp_download_url?: string }> };
-      code?: number;
-    };
-
-    const parts: string[] = [];
-    const fileTokens: string[] = [];
-    const tokenToIndex = new Map<string, number>();
-
-    const collectBlocks = async (blockId: string): Promise<boolean> => {
-      let pt: string | undefined;
-      do {
-        const res = (await this.client.request({
-          method: "GET",
-          url: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}/children`,
-          data: { document_revision_id: -1, page_size: 500, page_token: pt },
-        })) as BlocksRes;
-        if (res?.code !== 0 || !res.data?.items) {
-          if (res?.code !== 0) this._log("warn", "docx blocks failed", { code: res?.code });
-          return false;
-        }
-        for (const block of res.data.items) {
-          const bt = block.block_type;
-          if (bt === 3 && block.image?.file_token) {
-            const token = block.image.file_token;
-            if (!tokenToIndex.has(token)) {
-              tokenToIndex.set(token, fileTokens.length);
-              fileTokens.push(token);
-            }
-            parts.push(`[图片 ${tokenToIndex.get(token)! + 1}](view_image_url_placeholder_${token})`);
-          } else if (block.text?.text) {
-            parts.push(block.text.text);
-          } else if (block.paragraph?.elements) {
-            for (const el of block.paragraph.elements) {
-              if (el.text_run?.text) parts.push(el.text_run.text);
-              if (el.file?.file_token) {
-                const token = el.file.file_token;
-                if (!tokenToIndex.has(token)) {
-                  tokenToIndex.set(token, fileTokens.length);
-                  fileTokens.push(token);
-                }
-                parts.push(`[图片 ${tokenToIndex.get(token)! + 1}](view_image_url_placeholder_${token})`);
-              }
-            }
-          }
-        }
-        pt = res.data.has_more ? res.data.page_token : undefined;
-      } while (pt);
-      return true;
-    };
-
-    const ok = await collectBlocks(documentId);
-    if (!ok) return null;
-
-    if (fileTokens.length === 0) {
-      return parts.join("") || null;
-    }
-
-    const urlRes = (await this.client.request({
-      method: "POST",
-      url: "/open-apis/drive/v1/medias/batch_get_tmp_download_url",
-      data: { file_tokens: fileTokens },
-    })) as TmpUrlRes;
-    if (urlRes?.code !== 0 || !urlRes.data?.tmp_download_urls) {
-      this._log("warn", "batch_get_tmp_download_url failed", { code: urlRes?.code });
-      return parts.join("").replace(/\[图片 \d+\]\(view_image_url_placeholder_[^)]+\)/g, "[图片]") || null;
-    }
-    const urlMap = new Map<string, string>();
-    for (const u of urlRes.data.tmp_download_urls) {
-      if (u.file_token && u.tmp_download_url) urlMap.set(u.file_token, u.tmp_download_url);
-    }
-    let out = parts.join("");
-    for (const [token, downloadUrl] of urlMap) {
-      out = out.replace(new RegExp(`view_image_url_placeholder_${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "g"), downloadUrl);
-    }
-    out = out.replace(/view_image_url_placeholder_[a-zA-Z0-9_-]+/g, "");
-    return out || null;
-  }
-
   private async fetchBotOpenId(): Promise<void> {
     try {
       const res = (await this.client.request({
@@ -334,22 +162,6 @@ export class FeishuHandler implements EndpointHandler {
     this.ctx.accept(msg).catch((err: unknown) => this._log("error", "accept failed", { err: String(err) }));
   }
 
-  setOnP2PChatEntered(handler: OnChatId | null): void {
-    this.onP2PChatEntered = handler;
-  }
-
-  setOnBotAddedToGroup(handler: OnChatId | null): void {
-    this.onBotAddedToGroup = handler;
-  }
-
-  setOnBotRemovedFromGroup(handler: OnChatId | null): void {
-    this.onBotRemovedFromGroup = handler;
-  }
-
-  setOnMessageRead(handler: ((data: unknown) => void) | null): void {
-    this.onMessageRead = handler;
-  }
-
   private buildAcceptMessage(opts: {
     chatId: string;
     text: string;
@@ -365,21 +177,21 @@ export class FeishuHandler implements EndpointHandler {
     const isPrivate = chatType === "私聊";
 
     const tags: ContextTag[] = [
-      { kind: "conv_type", value: chatType, streamKey: false },
-      { kind: "chat_id", value: chatId, streamKey: true, routing: true },
+      { kind: "conv_type", value: chatType, groupWith: false },
+      { kind: "chat_id", value: chatId, groupWith: true, passToTool: true },
     ];
 
     if (!isPrivate) {
       const groupName = chatName || `群${chatId.slice(-8)}`;
-      tags.push({ kind: "group", value: groupName, streamKey: false });
+      tags.push({ kind: "group", value: groupName, groupWith: false });
     }
 
     if (senderName) {
-      tags.push({ kind: "participant", value: senderName, streamKey: false });
+      tags.push({ kind: "participant", value: senderName, groupWith: false });
     }
 
     if (senderId) {
-      tags.push({ kind: "sender_id", value: senderId, streamKey: false, routing: true });
+      tags.push({ kind: "sender_id", value: senderId, groupWith: false, passToTool: true });
     }
 
     const content = [];
@@ -461,7 +273,7 @@ export class FeishuHandler implements EndpointHandler {
         this.saveExternalUserLabel(userId, label);
       }
       const fallback: UserInfo = { name: label };
-      this.userCache.set(userId, { value: fallback, ts: Date.now() - (this.CACHE_TTL - NEGATIVE_CACHE_TTL) });
+      this.userCache.set(userId, { value: fallback, ts: Date.now() });
 
       return fallback;
     }
@@ -498,7 +310,7 @@ export class FeishuHandler implements EndpointHandler {
       }
 
       const fallback: ChatInfo = { name: chatId };
-      this.chatCache.set(chatId, { value: fallback, ts: Date.now() - (this.CACHE_TTL - NEGATIVE_CACHE_TTL) });
+      this.chatCache.set(chatId, { value: fallback, ts: Date.now() });
 
       return fallback;
     }
@@ -520,12 +332,6 @@ export class FeishuHandler implements EndpointHandler {
     }
 
     this._log("debug", `cache cleaned: users=${this.userCache.size}, chats=${this.chatCache.size}`);
-  }
-
-  private inferChatType(chatId: string): "group" | "p2p" {
-    if (this.chatCache.has(chatId)) return "group";
-    if (chatId.startsWith("oc_")) return "group";
-    return "p2p";
   }
 
   private async saveResourceToLocal(
@@ -640,18 +446,6 @@ export class FeishuHandler implements EndpointHandler {
           this.mentionNameToId.set(userInfo.name, senderId);
         }
 
-        if (messageId && chatId) {
-          this.msgMetaMap.set(messageId, {
-            chatId,
-            senderId,
-            senderName: userInfo?.name ?? "",
-          });
-          if (this.msgMetaMap.size > this.MSG_META_MAP_MAX) {
-            const firstKey = this.msgMetaMap.keys().next().value;
-            if (firstKey) this.msgMetaMap.delete(firstKey);
-          }
-        }
-
         let text = "";
         const attachments: FeishuAttachment[] = [];
         if (messageType === "text") {
@@ -732,166 +526,6 @@ export class FeishuHandler implements EndpointHandler {
             mentionsSelf,
             attachments,
             timestamp,
-          })
-        );
-      },
-      "im.chat.access_event.bot_p2p_chat_entered_v1": async (data: unknown) => {
-        const event = data as FeishuChatIdEvent;
-        const chatId = event.chat_id ?? event.event?.chat_id ?? "";
-        if (chatId && this.onP2PChatEntered) this.onP2PChatEntered(chatId);
-      },
-      "im.chat.member.bot.added_v1": async (data: unknown) => {
-        const event = data as FeishuChatIdEvent;
-        const chatId = event.chat_id ?? event.event?.chat_id ?? "";
-        if (chatId && this.onBotAddedToGroup) this.onBotAddedToGroup(chatId);
-      },
-      "im.chat.member.bot.deleted_v1": async (data: unknown) => {
-        const event = data as FeishuChatIdEvent;
-        const chatId = event.chat_id ?? event.event?.chat_id ?? "";
-        if (chatId) {
-          this._log("info", `bot removed from group ${chatId}`);
-          if (this.onBotRemovedFromGroup) this.onBotRemovedFromGroup(chatId);
-        }
-      },
-      "im.message.message_read_v1": async (data: unknown) => {
-        if (this.onMessageRead) this.onMessageRead(data);
-      },
-      "im.message.recalled_v1": async (data: unknown) => {
-        if (!this.ctx) return;
-        const event = data as FeishuRecalledEvent;
-        const messageId = event.message_id ?? "";
-        const recallType = event.recall_type ?? "unknown";
-
-        const meta = this.msgMetaMap.get(messageId);
-        const chatId = meta?.chatId ?? event.chat_id ?? "";
-        if (!chatId) {
-          this._log("warn", `recalled unknown message ${messageId}, skipping`);
-          return;
-        }
-
-        let msgSenderId = meta?.senderId ?? "";
-        let msgSenderName = meta?.senderName ?? "";
-
-        if (!msgSenderId) {
-          try {
-            const res = (await this.client.request({
-              method: "GET",
-              url: `/open-apis/im/v1/messages/${messageId}`,
-              data: {},
-              params: { user_id_type: "open_id" },
-            })) as { data?: { items?: Array<{ sender?: { id?: string; sender_type?: string } }> } };
-            const sender = res.data?.items?.[0]?.sender;
-            if (sender?.id && sender.sender_type === "user") {
-              msgSenderId = sender.id;
-              const senderInfo = await this.getUserInfo(msgSenderId);
-              msgSenderName = senderInfo?.name ?? "";
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        const chatType = this.inferChatType(chatId);
-
-        let text: string;
-        if (msgSenderName) {
-          if (recallType === "message_owner") {
-            text = `[${msgSenderName} 撤回了自己的一条消息]`;
-          } else if (recallType === "group_owner") {
-            text = `[群主撤回了 ${msgSenderName} 的一条消息]`;
-          } else if (recallType === "group_manager") {
-            text = `[群管理员撤回了 ${msgSenderName} 的一条消息]`;
-          } else if (recallType === "enterprise_manager") {
-            text = `[企业管理员撤回了 ${msgSenderName} 的一条消息]`;
-          } else {
-            text = `[${msgSenderName} 的一条消息被撤回]`;
-          }
-        } else {
-          const recallLabel: Record<string, string> = {
-            message_owner: "消息发送者",
-            group_owner: "群主",
-            group_manager: "群管理员",
-            enterprise_manager: "企业管理员",
-          };
-          const actor = recallLabel[recallType] ?? "某人";
-          text = `[${actor}撤回了一条消息]`;
-        }
-
-        this._log("info", `message recalled: ${messageId} by ${msgSenderName || "(unknown)"}(${msgSenderId}) recall_type=${recallType} in ${chatId}`);
-
-        const isP2pRecall = chatType === "p2p";
-        this.acceptMessage(
-          this.buildAcceptMessage({
-            chatId,
-            text,
-            chatType: isP2pRecall ? "私聊" : "群聊",
-            senderId: msgSenderId,
-            senderName: msgSenderName,
-            timestamp: event.recall_time ? parseInt(event.recall_time, 10) : Date.now(),
-          })
-        );
-      },
-      "im.message.reaction.created_v1": async (data: unknown) => {
-        if (!this.ctx) return;
-        const event = data as FeishuReactionEvent;
-        const messageId = event.message_id ?? "";
-        const emoji = event.reaction_type?.emoji_type ?? "UNKNOWN";
-        const reactorId = event.user_id?.open_id ?? event.user_id?.user_id ?? "";
-
-        const meta = this.msgMetaMap.get(messageId);
-        const chatId = meta?.chatId ?? "";
-        if (!chatId) {
-          this._log("warn", `reaction on unknown message ${messageId}, skipping`);
-          return;
-        }
-
-        const reactorInfo = reactorId ? await this.getUserInfo(reactorId) : null;
-        const reactorName = reactorInfo?.name || reactorId || "某人";
-        const chatType = this.inferChatType(chatId);
-
-        this._log("info", `reaction ${emoji} on ${messageId} by ${reactorName}(${reactorId})`);
-
-        const isP2pReaction = chatType === "p2p";
-        this.acceptMessage(
-          this.buildAcceptMessage({
-            chatId,
-            text: `[${reactorName} 对一条消息贴了表情 ${emoji} (message_id: ${messageId})]`,
-            chatType: isP2pReaction ? "私聊" : "群聊",
-            senderId: reactorId,
-            senderName: reactorName,
-            timestamp: event.action_time ? parseInt(event.action_time, 10) : Date.now(),
-          })
-        );
-      },
-      "im.message.reaction.deleted_v1": async (data: unknown) => {
-        if (!this.ctx) return;
-        const event = data as FeishuReactionEvent;
-        const messageId = event.message_id ?? "";
-        const emoji = event.reaction_type?.emoji_type ?? "UNKNOWN";
-        const reactorId = event.user_id?.open_id ?? event.user_id?.user_id ?? "";
-
-        const meta2 = this.msgMetaMap.get(messageId);
-        const chatId = meta2?.chatId ?? "";
-        if (!chatId) {
-          this._log("warn", `reaction-delete on unknown message ${messageId}, skipping`);
-          return;
-        }
-
-        const reactorInfo = reactorId ? await this.getUserInfo(reactorId) : null;
-        const reactorName = reactorInfo?.name || reactorId || "某人";
-        const chatType = this.inferChatType(chatId);
-
-        this._log("info", `reaction removed ${emoji} on ${messageId} by ${reactorName}(${reactorId})`);
-
-        const isP2pDel = chatType === "p2p";
-        this.acceptMessage(
-          this.buildAcceptMessage({
-            chatId,
-            text: `[${reactorName} 移除了表情 ${emoji} (message_id: ${messageId})]`,
-            chatType: isP2pDel ? "私聊" : "群聊",
-            senderId: reactorId,
-            senderName: reactorName,
-            timestamp: event.action_time ? parseInt(event.action_time, 10) : Date.now(),
           })
         );
       },

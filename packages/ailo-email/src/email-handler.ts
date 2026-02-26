@@ -229,10 +229,10 @@ export class EmailHandler implements EndpointHandler {
     const attachments = await this.saveAttachmentsToWorkdir(parsed);
 
     const contextTags: ContextTag[] = [
-      { kind: "conv_type", value: "私聊", streamKey: true },
-      { kind: "chat_id", value: fromAddr, streamKey: true, routing: true },
-      { kind: "participant", value: fromName, streamKey: false },
-      { kind: "sender_id", value: fromAddr, streamKey: false, routing: true },
+      { kind: "conv_type", value: "私聊", groupWith: true },
+      { kind: "chat_id", value: fromAddr, groupWith: true, passToTool: true },
+      { kind: "participant", value: fromName, groupWith: false },
+      { kind: "sender_id", value: fromAddr, groupWith: false, passToTool: true },
     ];
 
     const content: AcceptMessage["content"] = [];

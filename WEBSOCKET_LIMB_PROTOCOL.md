@@ -262,7 +262,6 @@ API Key 在 **aido 管理界面**创建和管理，无需代码注册。
   "id": "m1",
   "method": "endpoint.accept",
   "params": {
-    "chatId": "chat_123",
     "content": [
       { "type": "text", "text": "你好" },
       {
@@ -271,7 +270,8 @@ API Key 在 **aido 管理界面**创建和管理，无需代码注册。
       }
     ],
     "contextTags": [
-      { "kind": "participant", "value": "张三", "streamKey": true }
+      { "kind": "participant", "value": "张三", "groupWith": true },
+      { "kind": "chat_id", "value": "oc_xxx", "groupWith": true, "passToTool": true }
     ],
     "requiresResponse": true
   }
@@ -280,9 +280,8 @@ API Key 在 **aido 管理界面**创建和管理，无需代码注册。
 
 | 字段 | 必须 | 说明 |
 |------|------|------|
-| `chatId` | 是 | 会话标识符，用于区分来自同一端点的不同对话（如飞书私聊 vs 群聊） |
 | `content` | 是* | 消息内容数组（`requiresResponse: true` 时至少一项） |
-| `contextTags` | 否 | 上下文标签（参与者、场景等） |
+| `contextTags` | 否 | 时空场标签。流分组与回复路由由端点通过 contextTags（含 groupWith、passToTool）自行携带 |
 | `requiresResponse` | 否 | 默认 `true`；设为 `false` 时走被动感知路径，允许空 content，不触发 LLM 推理 |
 
 ### 6.2 world_update（cap: world_update）
@@ -557,11 +556,11 @@ SDK 使用 WebSocket 标准 ping/pong 机制（不走应用层帧）：
    服务端 → 飞书: res(ok=true, protocol=2)
 
 2. 用户发消息
-   飞书 → 服务端: endpoint.accept(chatId=chat_1, content=[{type:text,text:"你好"}], requiresResponse=true)
+   飞书 → 服务端: endpoint.accept(content=[{type:text,text:"你好"}], contextTags=[{kind:"chat_id",value:"oc_xxx",groupWith:true,passToTool:true}], requiresResponse=true)
    服务端 → 飞书: res(ok=true, accepted=true)
 
 3. 意识推理 → 调用飞书回复工具
-   服务端 → 飞书: event(tool_request, name=feishu.send, args={chat_id:chat_1, text:"你好！"})
+   服务端 → 飞书: event(tool_request, name=feishu.send, args={chat_id:oc_xxx, text:"你好！"})
    飞书 → 服务端: tool_response(id=req_xxx, success=true)
 ```
 
@@ -571,6 +570,7 @@ SDK 使用 WebSocket 标准 ping/pong 机制（不走应用层帧）：
 
 | 版本 | 变更 |
 |------|------|
+| v2.4 | `endpoint.accept` 移除 `chatId` 必填；流分组与回复路由由 contextTags（groupWith、passToTool）承载；ContextTag 字段 `streamKey`→`groupWith`、`routing`→`passToTool` |
 | v3.0 | 引入 Blueprint（蓝图）体系：URL 可寻址的设备说明文档，N:M 端点引用，工具按蓝图注册（引用计数），endpointId 路由参数，per-tool timeout/async 标记；工具执行统一走 WebSocket（废弃 MCP stdio 双通道）；ConnectParams 新增 `blueprints` 字段 |
 | v2.3 | 修复 `world_enrichment` 帧类型（`res` → `event`）；所有 event 帧统一分配 `seq` 序列号；`endpoint.accept` 强制 `chatId` 字段；`endpointId` 唯一性强制（新连接替换旧连接）；章节编号统一；完全移除 `channel` 角色定义 |
 | v2.2 | 端点声明的 `tools` 动态注册进工具注册表（LLM 可直接调用）；`tool_response` 关联回等待结果；`BuildSection` 将 tools 列表注入系统提示词；新增标准 Skill Document 格式 |

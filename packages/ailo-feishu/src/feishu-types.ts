@@ -15,8 +15,6 @@ export type FeishuAttachment = {
   name?: string;
 };
 
-export type OnChatId = (chatId: string) => void;
-
 export type FeishuMention = {
   key: string;
   id: { open_id?: string; user_id?: string };
@@ -41,22 +39,6 @@ export type FeishuMessageEvent = {
   };
 };
 
-export type FeishuChatIdEvent = { chat_id?: string; event?: { chat_id?: string } };
-
-export type FeishuRecalledEvent = {
-  message_id?: string;
-  chat_id?: string;
-  recall_time?: string;
-  recall_type?: string;
-};
-
-export type FeishuReactionEvent = {
-  message_id?: string;
-  reaction_type?: { emoji_type?: string };
-  user_id?: { open_id?: string; user_id?: string };
-  action_time?: string;
-};
-
 export interface CacheEntry<T> {
   value: T;
   ts: number;
@@ -72,7 +54,6 @@ export interface ChatInfo {
 }
 
 export const STALE_MESSAGE_THRESHOLD_MS = 5 * 60 * 1000;
-export const NEGATIVE_CACHE_TTL = 5 * 60 * 1000;
 
 export const MEDIA_MESSAGE_CONFIG: Record<
   string,

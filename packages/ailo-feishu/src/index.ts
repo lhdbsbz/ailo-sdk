@@ -17,7 +17,10 @@ runEndpoint({
   handler,
   displayName: "飞书",
   caps: ["message", "tool_execute"],
-  blueprints: [process.env.AILO_BLUEPRINT_FEISHU ?? "blueprints/feishu-channel.blueprint.md"],
+  blueprints: [
+    process.env.BLUEPRINT_FEISHU_URL ??
+      "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/feishu-channel.blueprint.md",
+  ],
   instructions: "外部用户：昵称为\"外部用户N\"的是非本组织成员。同一编号始终对应同一人。",
   toolHandlers: {
     send: async (args: Record<string, unknown>) => {
@@ -31,11 +34,6 @@ runEndpoint({
       }));
       await handler.sendText(args.chat_id as string, (args.text as string) ?? "", atts);
       return `已发送到 ${args.chat_id}`;
-    },
-    read_doc: async (args: Record<string, unknown>) => {
-      const content = await handler.fetchDocRawContent(args.url as string);
-      if (content === null) throw new Error("无法获取文档");
-      return content;
     },
     set_nickname: async (args: Record<string, unknown>) => {
       await handler.onCommand("set_nickname", {

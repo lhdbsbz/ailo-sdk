@@ -17,15 +17,6 @@ tools:
           items: { type: object }
       required: [chat_id, text]
 
-  - name: read_doc
-    timeout: 30
-    description: 读取飞书文档内容
-    parameters:
-      type: object
-      properties:
-        url: { type: string, description: 飞书文档链接 }
-      required: [url]
-
   - name: set_nickname
     timeout: 10
     description: 设置外部用户显示昵称
@@ -39,7 +30,7 @@ tools:
 
 ## 端点说明
 
-飞书即时通讯通道，连接企业内所有飞书用户和群组。通过该通道可以与飞书用户私聊、在群组中发送和接收消息、读取飞书文档。
+飞书即时通讯通道，连接企业内所有飞书用户和群组。通过该通道可以与飞书用户私聊、在群组中发送和接收消息。
 
 `chat_id` 格式：
 - 用户私聊：`ou_` 前缀（如 `ou_abc123def456`）
@@ -49,7 +40,6 @@ tools:
 
 - 接收飞书用户的消息并回复
 - 在飞书群组中提供智能助手服务
-- 读取飞书文档内容并进行分析或总结
 - 管理外部用户的显示名称
 
 ## 工具使用说明
@@ -63,10 +53,6 @@ tools:
 ```
 @张三(ou_abc123) 你好，请查看以下内容。
 ```
-
-### read_doc — 读取文档
-
-传入飞书文档的完整 URL，返回文档的文本内容。
 
 ### set_nickname — 设置昵称
 

@@ -5,6 +5,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { WebchatHandler } from "./webchat-handler.js";
 
+type ConsoleToolArgs = {
+  action: "send";
+  text: string;
+};
+
 export function createWebchatMcpServer(handler: WebchatHandler): McpServer {
   const server = new McpServer({ name: "ailo-webchat", version: "0.1.0" });
 
@@ -17,7 +22,7 @@ export function createWebchatMcpServer(handler: WebchatHandler): McpServer {
         text: z.string().describe("要发送的文本内容"),
       },
     },
-    async (args) => {
+    async (args: ConsoleToolArgs) => {
       if (args.action === "send") {
         handler.recordAiloReply(args.text);
         return {

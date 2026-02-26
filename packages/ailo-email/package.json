@@ -13,6 +13,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@lmcl/ailo-endpoint-sdk": "*",
     "dotenv": "^16.4.5",
     "imapflow": "^1.2.10",

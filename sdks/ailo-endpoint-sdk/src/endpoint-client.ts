@@ -395,7 +395,6 @@ export class EndpointClient implements EndpointStorage {
 
   private async acceptDirect(msg: AcceptMessage): Promise<void> {
     const params: Record<string, unknown> = {
-      chatId: msg.chatId,
       content: msg.content,
       contextTags: msg.contextTags,
     };

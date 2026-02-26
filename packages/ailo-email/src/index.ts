@@ -29,7 +29,10 @@ runEndpoint({
   handler,
   displayName: "邮件",
   caps: ["message", "tool_execute"],
-  blueprints: [process.env.AILO_BLUEPRINT_EMAIL ?? "blueprints/email-channel.blueprint.md"],
+  blueprints: [
+    process.env.BLUEPRINT_EMAIL_URL ??
+      "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/email-channel.blueprint.md",
+  ],
   instructions: "邮件通道：chat_id 为发件人邮箱地址。",
   toolHandlers: {
     send: async (args: Record<string, unknown>) => {
