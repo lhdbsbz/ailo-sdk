@@ -4,20 +4,19 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type {
-  ChannelHandler,
-  ChannelContext,
-  ChannelMessage,
-  ContextTag,
-} from "@lmcl/ailo-channel-sdk";
-import { textPart } from "@lmcl/ailo-channel-sdk";
+  EndpointHandler,
+  EndpointContext,
+} from "@lmcl/ailo-endpoint-sdk";
+import type { AcceptMessage, ContextTag } from "@lmcl/ailo-endpoint-sdk";
+import { textPart } from "@lmcl/ailo-endpoint-sdk";
 
 export interface WebchatConfig {
   /** Web UI 端口 */
   webPort?: number;
 }
 
-export class WebchatHandler implements ChannelHandler {
-  private ctx: ChannelContext | null = null;
+export class WebchatHandler implements EndpointHandler {
+  private ctx: EndpointContext | null = null;
   private httpServer: ReturnType<typeof createServer> | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
@@ -27,7 +26,7 @@ export class WebchatHandler implements ChannelHandler {
     this.config = config;
   }
 
-  async start(ctx: ChannelContext): Promise<void> {
+  async start(ctx: EndpointContext): Promise<void> {
     this.ctx = ctx;
     const port = this.config.webPort ?? 3001;
     const htmlPath = join(dirname(fileURLToPath(import.meta.url)), "console.html");
@@ -95,7 +94,7 @@ export class WebchatHandler implements ChannelHandler {
       { kind: "participant", value: name, streamKey: false },
     ];
 
-    const msg: ChannelMessage = {
+    const msg: AcceptMessage = {
       content: [textPart(text)],
       contextTags: tags,
     };

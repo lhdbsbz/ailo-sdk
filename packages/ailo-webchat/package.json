@@ -17,7 +17,7 @@
     "src/console.html"
   ],
   "dependencies": {
-    "@lmcl/ailo-channel-sdk": "^0.3.0",
+    "@lmcl/ailo-endpoint-sdk": "*",
     "dotenv": "^16.4.5",
     "ws": "^8.18.0",
     "zod": "^3.23.0"

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { runMcpChannel } from "@lmcl/ailo-channel-sdk";
+import { runEndpoint } from "@lmcl/ailo-endpoint-sdk";
 import "dotenv/config";
 import { FeishuHandler } from "./feishu-handler.js";
-import { createFeishuMcpServer } from "./mcp-server.js";
 
 const FEISHU_APP_ID = process.env.FEISHU_APP_ID ?? "";
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET ?? "";
@@ -14,24 +13,36 @@ if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
 
 const handler = new FeishuHandler({ appId: FEISHU_APP_ID, appSecret: FEISHU_APP_SECRET });
 
-function feishuBuildChannelInstructions(): string {
-  return `ID 格式：ou_xxx 是飞书用户 ID，oc_xxx 是群组 ID。
-
-@提及：@提及格式为 @显示名(ou_xxx)。使用此格式可触发飞书强提醒。
-
-表情：飞书仅支持 Unicode emoji（😊👍❤️），不支持 :xxx: 冒号格式。
-
-外部用户：昵称为"外部用户N"的是非本组织成员，飞书无法获取其真实姓名。同一编号始终对应同一人。昵称可通过 feishu action=set_nickname 更新。
-
-转发限制：私聊消息只能发给曾与你发起过私聊的用户。`;
-}
-
-const mcpServer = createFeishuMcpServer(handler);
-
-runMcpChannel({
+runEndpoint({
   handler,
   displayName: "飞书",
-  defaultRequiresResponse: true,
-  buildChannelInstructions: feishuBuildChannelInstructions,
-  mcpServer,
+  caps: ["message", "tool_execute"],
+  blueprints: [process.env.AILO_BLUEPRINT_FEISHU ?? "blueprints/feishu-channel.blueprint.md"],
+  instructions: "外部用户：昵称为\"外部用户N\"的是非本组织成员。同一编号始终对应同一人。",
+  toolHandlers: {
+    send: async (args: Record<string, unknown>) => {
+      const atts = ((args.attachments as any[]) ?? []).map((a: any) => ({
+        type: a.type,
+        file_path: a.path,
+        base64: a.base64,
+        mime: a.mime,
+        name: a.name,
+        duration: a.duration,
+      }));
+      await handler.sendText(args.chat_id as string, (args.text as string) ?? "", atts);
+      return `已发送到 ${args.chat_id}`;
+    },
+    read_doc: async (args: Record<string, unknown>) => {
+      const content = await handler.fetchDocRawContent(args.url as string);
+      if (content === null) throw new Error("无法获取文档");
+      return content;
+    },
+    set_nickname: async (args: Record<string, unknown>) => {
+      await handler.onCommand("set_nickname", {
+        sender_id: args.sender_id as string,
+        nickname: args.nickname as string,
+      });
+      return `已将 ${args.sender_id} 的备注设为 ${args.nickname}`;
+    },
+  },
 });

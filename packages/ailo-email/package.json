@@ -13,7 +13,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@lmcl/ailo-channel-sdk": "^0.3.0",
+    "@lmcl/ailo-endpoint-sdk": "*",
     "dotenv": "^16.4.5",
     "imapflow": "^1.2.10",
     "mailparser": "^3.6.6",

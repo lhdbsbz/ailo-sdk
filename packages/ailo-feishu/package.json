@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.56.1",
-    "@lmcl/ailo-channel-sdk": "^0.3.0",
+    "@lmcl/ailo-endpoint-sdk": "*",
     "dotenv": "^16.4.5",
     "zod": "^4.3.6"
   },

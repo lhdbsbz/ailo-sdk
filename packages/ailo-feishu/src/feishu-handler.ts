@@ -3,15 +3,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import {
-  getWorkDir,
-  type ChannelHandler,
-  type ChannelMessage,
-  type ChannelContext,
-  type ChannelStorage,
+  type EndpointHandler,
+  type AcceptMessage,
+  type EndpointContext,
+  type EndpointStorage,
   type ContextTag,
   textPart,
   mediaPart,
-} from "@lmcl/ailo-channel-sdk";
+} from "@lmcl/ailo-endpoint-sdk";
+import { getWorkDir } from "@lmcl/ailo-endpoint-sdk";
 import {
   type CacheEntry,
   type ChatInfo,
@@ -38,10 +38,10 @@ import {
 
 export type { FeishuConfig, FeishuAttachment, OnChatId } from "./feishu-types.js";
 
-export class FeishuHandler implements ChannelHandler {
+export class FeishuHandler implements EndpointHandler {
   private client: Lark.Client;
   private wsClient: Lark.WSClient | null = null;
-  private ctx: ChannelContext | null = null;
+  private ctx: EndpointContext | null = null;
   private onP2PChatEntered: OnChatId | null = null;
   private onBotAddedToGroup: OnChatId | null = null;
   private onBotRemovedFromGroup: OnChatId | null = null;
@@ -73,7 +73,7 @@ export class FeishuHandler implements ChannelHandler {
     });
   }
 
-  private get storage(): ChannelStorage | null {
+  private get storage(): EndpointStorage | null {
     return this.ctx?.storage ?? null;
   }
 
@@ -329,7 +329,7 @@ export class FeishuHandler implements ChannelHandler {
     return { text: resolved, mentionsSelf };
   }
 
-  private acceptMessage(msg: ChannelMessage): void {
+  private acceptMessage(msg: AcceptMessage): void {
     if (!this.ctx) return;
     this.ctx.accept(msg).catch((err: unknown) => this._log("error", "accept failed", { err: String(err) }));
   }
@@ -350,7 +350,7 @@ export class FeishuHandler implements ChannelHandler {
     this.onMessageRead = handler;
   }
 
-  private buildChannelMessage(opts: {
+  private buildAcceptMessage(opts: {
     chatId: string;
     text: string;
     chatType: "群聊" | "私聊";
@@ -360,7 +360,7 @@ export class FeishuHandler implements ChannelHandler {
     mentionsSelf?: boolean;
     timestamp?: number;
     attachments?: Array<{ type: string; path?: string; url?: string; base64?: string; mime?: string; name?: string }>;
-  }): ChannelMessage {
+  }): AcceptMessage {
     const { chatId, text, chatType, senderId = "", senderName = "", chatName, attachments } = opts;
     const isPrivate = chatType === "私聊";
 
@@ -565,7 +565,7 @@ export class FeishuHandler implements ChannelHandler {
     return path.resolve(outPath);
   }
 
-  async start(ctx: ChannelContext): Promise<void> {
+  async start(ctx: EndpointContext): Promise<void> {
     this.ctx = ctx;
     this.loadExternalUserLabels();
     this.fetchBotOpenId();
@@ -722,7 +722,7 @@ export class FeishuHandler implements ChannelHandler {
 
         const isP2p = chatType === "p2p";
         this.acceptMessage(
-          this.buildChannelMessage({
+          this.buildAcceptMessage({
             chatId,
             text,
             chatType: isP2p ? "私聊" : "群聊",
@@ -821,7 +821,7 @@ export class FeishuHandler implements ChannelHandler {
 
         const isP2pRecall = chatType === "p2p";
         this.acceptMessage(
-          this.buildChannelMessage({
+          this.buildAcceptMessage({
             chatId,
             text,
             chatType: isP2pRecall ? "私聊" : "群聊",
@@ -853,7 +853,7 @@ export class FeishuHandler implements ChannelHandler {
 
         const isP2pReaction = chatType === "p2p";
         this.acceptMessage(
-          this.buildChannelMessage({
+          this.buildAcceptMessage({
             chatId,
             text: `[${reactorName} 对一条消息贴了表情 ${emoji} (message_id: ${messageId})]`,
             chatType: isP2pReaction ? "私聊" : "群聊",
@@ -885,7 +885,7 @@ export class FeishuHandler implements ChannelHandler {
 
         const isP2pDel = chatType === "p2p";
         this.acceptMessage(
-          this.buildChannelMessage({
+          this.buildAcceptMessage({
             chatId,
             text: `[${reactorName} 移除了表情 ${emoji} (message_id: ${messageId})]`,
             chatType: isP2pDel ? "私聊" : "群聊",

@@ -15,7 +15,8 @@ import type { ParsedMail } from "mailparser";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import path from "path";
-import { getWorkDir, type ChannelHandler, type ChannelMessage, type ChannelContext, type ContextTag, textPart, mediaPart } from "@lmcl/ailo-channel-sdk";
+import { type EndpointHandler, type AcceptMessage, type EndpointContext, type ContextTag, textPart, mediaPart } from "@lmcl/ailo-endpoint-sdk";
+import { getWorkDir } from "@lmcl/ailo-endpoint-sdk";
 
 export type EmailConfig = {
   imapHost: string;
@@ -58,9 +59,9 @@ type Checkpoint = {
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 60_000;
 
-export class EmailHandler implements ChannelHandler {
+export class EmailHandler implements EndpointHandler {
   private config: EmailConfig;
-  private ctx: ChannelContext | null = null;
+  private ctx: EndpointContext | null = null;
   private imap: ImapFlow | null = null;
   private transporter: nodemailer.Transporter | null = null;
   private stopped = false;
@@ -71,7 +72,7 @@ export class EmailHandler implements ChannelHandler {
     this.config = config;
   }
 
-  async start(ctx: ChannelContext): Promise<void> {
+  async start(ctx: EndpointContext): Promise<void> {
     this.ctx = ctx;
     this.stopped = false;
     this.imapLoop().catch((err: unknown) => console.error("[email] fatal imapLoop error:", err));
@@ -234,7 +235,7 @@ export class EmailHandler implements ChannelHandler {
       { kind: "sender_id", value: fromAddr, streamKey: false, routing: true },
     ];
 
-    const content: ChannelMessage["content"] = [];
+    const content: AcceptMessage["content"] = [];
     const bodyText = `[主题: ${subject}]\n\n${text}`.trim();
     if (bodyText) content.push(textPart(bodyText));
     for (const a of attachments) {
