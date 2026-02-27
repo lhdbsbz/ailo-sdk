@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import path from "path";
 import type {
   AcceptMessage,
   WorldUpdatePayload,
@@ -13,6 +14,17 @@ import type {
 } from "./types.js";
 
 const SDK_VERSION = "1.0.0";
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function resolveBlueprintPath(blueprint: string): string {
+  if (!blueprint) return "";
+  if (blueprint.startsWith("http://") || blueprint.startsWith("https://") || blueprint.startsWith("file://")) {
+    return blueprint;
+  }
+  const cwd = process.cwd();
+  return path.resolve(cwd, blueprint);
+}
 const REQUEST_TIMEOUT_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
@@ -298,7 +310,9 @@ export class EndpointClient implements EndpointStorage {
       };
       if (this.cfg.instructions) connectParams.instructions = this.cfg.instructions;
       if (this.cfg.tools && this.cfg.tools.length > 0) connectParams.tools = this.cfg.tools;
-      if (this.cfg.blueprints && this.cfg.blueprints.length > 0) connectParams.blueprints = this.cfg.blueprints;
+      if (this.cfg.blueprints && this.cfg.blueprints.length > 0) {
+        connectParams.blueprints = this.cfg.blueprints.map(resolveBlueprintPath);
+      }
       ws.send(JSON.stringify({ type: "req", id, method: "connect", params: connectParams }));
     });
   }
