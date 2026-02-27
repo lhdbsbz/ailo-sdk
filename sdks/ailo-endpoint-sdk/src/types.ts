@@ -37,6 +37,15 @@ export type ContextTag = {
   passToTool?: boolean;
 };
 
+// ─── Skill metadata ──────────────────────────────────────────────────────────
+
+/** A skill loaded from a local SKILL.md file and reported to the brain at connect time. */
+export type SkillMeta = {
+  name: string;
+  description: string;
+  content: string;
+};
+
 // ─── Tool capability declaration ─────────────────────────────────────────────
 
 /** Describes a tool this endpoint can execute on behalf of the agent */
@@ -79,6 +88,8 @@ export type ToolResponsePayload = {
   success: boolean;
   result?: unknown;
   error?: string;
+  /** Unified content format (same as AcceptMessage.content). Preferred over result when present. */
+  content?: ContentPart[];
 };
 
 // ─── Outbound message types (server → endpoint) ───────────────────────────────
@@ -123,7 +134,8 @@ export type StreamPayload = {
 
 // ─── Tool handler ─────────────────────────────────────────────────────────────
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+/** Tool handler return type: ContentPart[] for multimodal results, or any other value for legacy text results. */
+export type ToolHandler = (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>;
 
 // ─── Storage interface ────────────────────────────────────────────────────────
 

@@ -11,12 +11,14 @@
  */
 
 import { EndpointClient } from "./endpoint-client.js";
+import { loadSkills } from "./skill-loader.js";
 import type {
   AcceptMessage,
   EndpointStorage,
   HealthStatus,
   ToolHandler,
   ToolCapability,
+  SkillMeta,
 } from "./types.js";
 
 export interface EndpointContext {
@@ -56,6 +58,16 @@ export interface EndpointConfig {
   endpointId?: string;
   /** Optional system instructions injected into agent context */
   instructions?: string;
+  /** Directories to scan for SKILL.md files (default: ["~/.agents/skills/"]) */
+  skillDirs?: string[];
+  /** When set, report these skills to the brain instead of loading from skillDirs (enables "only report enabled skills") */
+  skills?: SkillMeta[];
+  /**
+   * 连接失败时调用（不传则 process.exit(1)）。
+   * 推荐：退避等待后，用最新配置调用 client.reconnect(undefined, latestConfig) 再试。
+   * 每次重试都应读取最新配置，便于配置热更新。
+   */
+  onConnectFailure?: (err: Error, client: EndpointClient) => void | Promise<void>;
 }
 
 export function runEndpoint(config: EndpointConfig): void {
@@ -76,6 +88,14 @@ export function runEndpoint(config: EndpointConfig): void {
 
   const tag = `[${endpointId}]`;
 
+  const skills =
+    config.skills !== undefined
+      ? config.skills
+      : loadSkills(config.skillDirs);
+  if (skills.length > 0) {
+    console.log(`${tag} loaded ${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`);
+  }
+
   const client = new EndpointClient({
     url: ailoWsUrl,
     apiKey: ailoApiKey,
@@ -85,6 +105,7 @@ export function runEndpoint(config: EndpointConfig): void {
     tools: config.tools,
     instructions: config.instructions,
     blueprints: config.blueprints,
+    skills,
   });
 
   if (config.toolHandlers) {
@@ -96,14 +117,20 @@ export function runEndpoint(config: EndpointConfig): void {
     });
   }
 
-  const shutdown = () => {
-    console.log(`${tag} shutting down...`);
+  const shutdown = (reason = "shutdown") => {
+    console.log(`${tag} shutting down... (${reason})`);
     Promise.resolve(handler.stop()).catch(() => {});
     client.close();
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  client.onEvicted(() => {
+    console.log(`${tag} evicted by a newer instance, exiting.`);
+    Promise.resolve(handler.stop()).catch(() => {});
+    process.exit(0);
+  });
 
   (async () => {
     const ctx: EndpointContext = {
@@ -118,12 +145,20 @@ export function runEndpoint(config: EndpointConfig): void {
       client,
     };
 
-    try {
-      await client.connect();
-      console.log(`${tag} Ailo WebSocket connected`);
-    } catch (err) {
-      console.error(`${tag} Ailo WebSocket connect failed:`, err);
-      process.exit(1);
+    for (;;) {
+      try {
+        await client.connect();
+        console.log(`${tag} Ailo WebSocket connected`);
+        break;
+      } catch (err) {
+        const e = err instanceof Error ? err : new Error(String(err));
+        console.error(`${tag} Ailo WebSocket connect failed:`, e.message);
+        if (config.onConnectFailure) {
+          await Promise.resolve(config.onConnectFailure(e, client));
+        } else {
+          process.exit(1);
+        }
+      }
     }
 
     try {

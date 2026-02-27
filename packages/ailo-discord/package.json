@@ -1,0 +1,28 @@
+{
+  "name": "@lmcl/ailo-discord",
+  "version": "0.1.0",
+  "description": "Ailo Discord 通道 — Discord.js Gateway 收消息 + REST API 发消息",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ailo-discord": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@lmcl/ailo-endpoint-sdk": "*",
+    "discord.js": "^13.17.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

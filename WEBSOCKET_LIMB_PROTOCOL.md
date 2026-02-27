@@ -317,6 +317,18 @@ API Key 在 **aido 管理界面**创建和管理，无需代码注册。
 
 返回工具执行结果，与 tool_request 的 `id` 关联。
 
+支持两种格式（优先使用 `content`，回退到 `result`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 关联 tool_request.id |
+| `success` | boolean | 是否成功 |
+| `result` | any | 旧格式：任意 JSON 结果（向后兼容） |
+| `error` | string | 错误信息（失败时） |
+| `content` | ContentPart[] | **新格式**：与 `endpoint.accept` 的 `content` 完全一致，支持文本+图片+音频+视频等混合内容。云端优先使用此字段，为空时回退到 `result` |
+
+**旧格式示例**（纯文本结果）：
+
 ```json
 {
   "type": "req",
@@ -329,6 +341,34 @@ API Key 在 **aido 管理界面**创建和管理，无需代码注册。
   }
 }
 ```
+
+**新格式示例**（截图工具返回图片）：
+
+```json
+{
+  "type": "req",
+  "id": "r2",
+  "method": "tool_response",
+  "params": {
+    "id": "req_002",
+    "success": true,
+    "content": [
+      { "type": "text", "text": "截图完成" },
+      {
+        "type": "image",
+        "media": {
+          "type": "image",
+          "base64": "/9j/4AAQ...",
+          "mime": "image/png",
+          "name": "screenshot.png"
+        }
+      }
+    ]
+  }
+}
+```
+
+`content` 中的 ContentPart 格式与 §6.1 `endpoint.accept` 完全一致（见该节说明）。云端收到 `content` 中的 base64 媒体后会自动落盘，并将图片内容注入下一轮 LLM 上下文作为视觉输入。
 
 ### 6.4 endpoint.health
 

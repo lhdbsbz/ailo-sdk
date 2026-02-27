@@ -800,7 +800,7 @@
 
     function connect() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}`);
+      ws = new WebSocket(`${protocol}//${window.location.host}/chat/ws`);
 
       statusDot.className = 'status-dot connecting';
 

@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import path from "path";
 import type {
   AcceptMessage,
+  ContentPart,
   WorldUpdatePayload,
   ToolResponsePayload,
   WorldEnrichmentPayload,
@@ -9,6 +10,7 @@ import type {
   ToolRequestPayload,
   StreamPayload,
   ToolCapability,
+  SkillMeta,
   HealthStatus,
   EndpointStorage,
 } from "./types.js";
@@ -31,6 +33,9 @@ const HEARTBEAT_TIMEOUT_MS = 10_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;
 const OFFLINE_BUFFER_MAX = 200;
+
+/** 配置变更后重连前的冷却时间（秒级），避免抖动 */
+export const RECONNECT_COOLDOWN_MS = 1000;
 
 // ─── Internal frame types ─────────────────────────────────────────────────────
 
@@ -57,6 +62,7 @@ export type IntentHandler = (payload: IntentPayload) => void;
 export type WorldEnrichmentHandler = (payload: WorldEnrichmentPayload) => void;
 export type StreamHandler = (payload: StreamPayload) => void;
 export type SignalHandler = (signal: string, data: unknown) => void;
+export type EvictedHandler = () => void;
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -77,13 +83,20 @@ export interface EndpointClientConfig {
    * Only relevant when "tool_execute" is in caps.
    */
   tools?: ToolCapability[];
-  /** Optional system-level instructions injected into the agent's context */
+  /** Optional system-level instructions injected into agent context */
   instructions?: string;
   /** Blueprint IDs to activate for this endpoint session */
   blueprints?: string[];
+  /** Skills loaded from local SKILL.md files, reported to the brain at connect time */
+  skills?: SkillMeta[];
   /** Max messages to buffer while disconnected (default: 200, 0 = disabled) */
   offlineBufferSize?: number;
 }
+
+/** 仅连接相关字段，用于热更新配置后重连（reconnect 第二参数） */
+export type ConnectionOverrides = Partial<
+  Pick<EndpointClientConfig, "url" | "apiKey" | "endpointId" | "displayName">
+>;
 
 // ─── EndpointClient ───────────────────────────────────────────────────────────
 
@@ -116,6 +129,7 @@ export class EndpointClient implements EndpointStorage {
   private worldEnrichmentHandler: WorldEnrichmentHandler | null = null;
   private streamHandler: StreamHandler | null = null;
   private signalHandlers = new Map<string, SignalHandler[]>();
+  private evictedHandler: EvictedHandler | null = null;
 
   constructor(config: EndpointClientConfig) {
     this.cfg = config;
@@ -136,6 +150,39 @@ export class EndpointClient implements EndpointStorage {
     this.rejectAllPending(new Error("client closed"));
     this.offlineBuffer.length = 0;
     if (this.ws) { this.ws.close(); this.ws = null; }
+  }
+
+  /**
+   * Reconnect with optional updated skills and/or connection config.
+   * - skills: so the server gets the latest enabled skills without restarting.
+   * - connectionOverrides: url/apiKey/endpointId/displayName — disconnect, wait ~1s, then connect with new config.
+   */
+  async reconnect(skills?: SkillMeta[], connectionOverrides?: ConnectionOverrides): Promise<void> {
+    if (skills !== undefined) this.cfg = { ...this.cfg, skills };
+    if (connectionOverrides) {
+      const { url, apiKey, endpointId, displayName } = connectionOverrides;
+      if (url !== undefined) this.cfg = { ...this.cfg, url };
+      if (apiKey !== undefined) this.cfg = { ...this.cfg, apiKey };
+      if (endpointId !== undefined) this.cfg = { ...this.cfg, endpointId };
+      if (displayName !== undefined) this.cfg = { ...this.cfg, displayName };
+    }
+    this.intentionalClose = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.stopHeartbeat();
+    this.rejectAllPending(new Error("reconnecting"));
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.intentionalClose = false;
+    this.reconnectAttempt = 0;
+    if (connectionOverrides) {
+      await new Promise((r) => setTimeout(r, RECONNECT_COOLDOWN_MS));
+    }
+    await this.connect();
   }
 
   // ─── Callback registration ──────────────────────────────────────────────────
@@ -172,6 +219,15 @@ export class EndpointClient implements EndpointStorage {
     const list = this.signalHandlers.get(signal) ?? [];
     list.push(handler);
     this.signalHandlers.set(signal, list);
+    return this;
+  }
+
+  /**
+   * Register a handler called when this endpoint is evicted by a newer instance
+   * connecting with the same endpointId. The process should exit in this handler.
+   */
+  onEvicted(handler: EvictedHandler): this {
+    this.evictedHandler = handler;
     return this;
   }
 
@@ -313,6 +369,7 @@ export class EndpointClient implements EndpointStorage {
       if (this.cfg.blueprints && this.cfg.blueprints.length > 0) {
         connectParams.blueprints = this.cfg.blueprints.map(resolveBlueprintPath);
       }
+      if (this.cfg.skills && this.cfg.skills.length > 0) connectParams.skills = this.cfg.skills;
       ws.send(JSON.stringify({ type: "req", id, method: "connect", params: connectParams }));
     });
   }
@@ -351,7 +408,22 @@ export class EndpointClient implements EndpointStorage {
       }
     });
 
-    ws.on("close", () => this.onDisconnect());
+    ws.on("close", (code, reason) => {
+      const isEvicted =
+        code === 1001 && reason?.toString().includes("replaced");
+
+      if (isEvicted) {
+        // 被新实例顶掉，当前进程没有继续运行的意义，通知上层退出。
+        this.intentionalClose = true;
+        this.evictedHandler?.();
+        return;
+      }
+
+      // 如果触发 close 的不是当前活跃连接（极端竞态），直接忽略。
+      if (ws !== this.ws) return;
+
+      this.onDisconnect();
+    });
     ws.on("pong", () => {
       if (this.pongTimer) { clearTimeout(this.pongTimer); this.pongTimer = null; }
     });
@@ -363,7 +435,12 @@ export class EndpointClient implements EndpointStorage {
         const payload = frame.payload as ToolRequestPayload;
         if (!this.toolRequestHandler || !payload?.id) return;
         void this.toolRequestHandler(payload)
-          .then((result) => this.toolResponse({ id: payload.id, success: true, result }))
+          .then((result) => {
+            if (Array.isArray(result) && result.length > 0 && typeof result[0] === "object" && result[0] !== null && "type" in result[0]) {
+              return this.toolResponse({ id: payload.id, success: true, content: result as ContentPart[] });
+            }
+            return this.toolResponse({ id: payload.id, success: true, result });
+          })
           .catch((err: Error) =>
             this.toolResponse({ id: payload.id, success: false, error: err.message }),
           );

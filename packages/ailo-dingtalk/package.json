@@ -1,31 +1,24 @@
 {
-  "name": "@lmcl/ailo-webchat",
+  "name": "@lmcl/ailo-dingtalk",
   "version": "0.1.0",
-  "description": "Ailo 网页聊天通道 MCP - 内置 Web UI",
+  "description": "Ailo 钉钉通道 — Stream 模式收消息 + sessionWebhook 发消息",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "ailo-webchat": "dist/index.js"
+    "ailo-dingtalk": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-html.cjs",
+    "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
-  "files": [
-    "dist",
-    "src/console.html"
-  ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "dingtalk-stream": "^2.0.4",
     "@lmcl/ailo-endpoint-sdk": "*",
-    "dotenv": "^16.4.5",
-    "ws": "^8.18.0",
-    "zod": "^4.3.6"
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "@types/ws": "^8.5.10",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },

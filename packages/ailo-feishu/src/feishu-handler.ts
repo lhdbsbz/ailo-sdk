@@ -744,16 +744,4 @@ export class FeishuHandler implements EndpointHandler {
   async stop(): Promise<void> {
     this.ctx = null;
   }
-
-  async onCommand(command: string, params: Record<string, unknown>): Promise<void> {
-    if (command !== "set_nickname") return;
-    const senderId = String(params.sender_id ?? "");
-    const nickname = String(params.nickname ?? "").trim();
-    if (!senderId || !nickname) return;
-
-    this.externalUserLabels.set(senderId, nickname);
-    this.userCache.set(senderId, { value: { name: nickname, openId: senderId }, ts: Date.now() });
-    this.mentionNameToId.set(nickname, senderId);
-    this.saveExternalUserLabel(senderId, nickname);
-  }
 }

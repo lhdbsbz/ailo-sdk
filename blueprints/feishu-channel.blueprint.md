@@ -17,15 +17,6 @@ tools:
           items: { type: object }
       required: [chat_id, text]
 
-  - name: set_nickname
-    timeout: 10
-    description: 设置外部用户显示昵称
-    parameters:
-      type: object
-      properties:
-        sender_id: { type: string, description: 外部用户的 sender_id }
-        nickname: { type: string, description: 要设置的显示昵称 }
-      required: [sender_id, nickname]
 ---
 
 ## 端点说明
@@ -40,7 +31,6 @@ tools:
 
 - 接收飞书用户的消息并回复
 - 在飞书群组中提供智能助手服务
-- 管理外部用户的显示名称
 
 ## 工具使用说明
 
@@ -48,18 +38,14 @@ tools:
 
 向指定用户或群组发送消息。
 
-@提及格式：`@显示名(ou_xxx)`，可触发飞书强提醒。例如：
+@提及格式：`@显示名 (ou_xxx)`，可触发飞书强提醒。例如：
 
 ```
-@张三(ou_abc123) 你好，请查看以下内容。
+@张三 (ou_abc123) 你好，请查看以下内容。
 ```
-
-### set_nickname — 设置昵称
-
-外部用户首次接入时默认显示为"外部用户N"，可通过此工具设置更具辨识度的名称。
 
 ## 约束
 
 - 私聊只能发给曾主动联系过机器人的用户
 - 仅支持 Unicode emoji，不支持 :emoji: 冒号格式
-- 外部用户默认显示为"外部用户N"（同一编号始终对应同一人）
+- 外部用户默认显示为"外部用户 N"（同一编号始终对应同一人，自动增长）
