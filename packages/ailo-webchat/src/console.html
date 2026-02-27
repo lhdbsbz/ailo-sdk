@@ -184,8 +184,8 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
-      max-width: 800px;
-      margin: 0 auto;
+      max-width: none;
+      margin: 0;
       width: 100%;
       position: relative;
     }
@@ -440,40 +440,6 @@
       height: 18px;
     }
 
-    /* Typing Indicator */
-    .typing {
-      display: none;
-      align-items: center;
-      gap: 4px;
-      padding: 14px 20px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      align-self: flex-start;
-      width: fit-content;
-    }
-
-    .typing.active {
-      display: flex;
-    }
-
-    .typing span {
-      width: 8px;
-      height: 8px;
-      background: var(--accent);
-      border-radius: 50%;
-      animation: bounce 1.4s infinite ease-in-out;
-    }
-
-    .typing span:nth-child(1) { animation-delay: 0s; }
-    .typing span:nth-child(2) { animation-delay: 0.15s; }
-    .typing span:nth-child(3) { animation-delay: 0.3s; }
-
-    @keyframes bounce {
-      0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-      40% { transform: scale(1); opacity: 1; }
-    }
-
     /* Modal */
     .modal-overlay {
       position: fixed;
@@ -662,11 +628,6 @@
       <p>发送消息开始对话</p>
       <p class="hint">我会尽力帮助你</p>
     </div>
-    <div class="typing" id="typing-indicator">
-      <span></span>
-      <span></span>
-      <span></span>
-    </div>
   </div>
 
   <div id="input-container">
@@ -686,7 +647,6 @@
     const sendBtn = document.getElementById('send-btn');
     const statusDot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
-    const typingIndicator = document.getElementById('typing-indicator');
 
     const setupModal = document.getElementById('setup-modal');
     const userNameInput = document.getElementById('user-name-input');
@@ -788,7 +748,6 @@
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'reply') {
-            hideTyping();
             addMessage('ailo', data.text);
           }
         } catch (err) {
@@ -825,7 +784,6 @@
       appendAndSave('user', text, Date.now());
       messageInput.value = '';
       messageInput.style.height = 'auto';
-      showTyping();
 
       ws.send(JSON.stringify({ type: 'chat', text, participantName: userName || '用户' }));
     }
@@ -851,7 +809,7 @@
         </div>
       `;
       
-      chatContainer.insertBefore(div, typingIndicator);
+      chatContainer.appendChild(div);
       chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
@@ -881,18 +839,9 @@
             <div class="message-time">${formatTime(timestamp)}</div>
           </div>
         `;
-        chatContainer.insertBefore(div, typingIndicator);
+        chatContainer.appendChild(div);
       }
       chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    function showTyping() {
-      typingIndicator.classList.add('active');
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    function hideTyping() {
-      typingIndicator.classList.remove('active');
     }
 
     function escapeHtml(text) {
