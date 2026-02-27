@@ -20,6 +20,8 @@ export class WebchatHandler implements EndpointHandler {
   private httpServer: ReturnType<typeof createServer> | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
+  private clientsByParticipant: Map<string, Set<WebSocket>> = new Map();
+  private participantByClient: Map<WebSocket, string> = new Map();
   private config: WebchatConfig;
 
   constructor(config: WebchatConfig = {}) {
@@ -59,7 +61,7 @@ export class WebchatHandler implements EndpointHandler {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "chat") {
-            this.handleChatMessage(msg.text, msg.participantName);
+            this.handleChatMessage(msg.text, msg.participantName, ws);
           }
         } catch (err) {
           this.ctx?.log("warn", `Failed to parse WebSocket message: ${err}`);
@@ -68,6 +70,7 @@ export class WebchatHandler implements EndpointHandler {
 
       ws.on("close", () => {
         this.clients.delete(ws);
+        this.unbindClient(ws);
         this.ctx?.log("info", `网页聊天客户端已断开, remaining: ${this.clients.size}`);
       });
 
@@ -83,15 +86,55 @@ export class WebchatHandler implements EndpointHandler {
     this.ctx.reportHealth("connected");
   }
 
-  private handleChatMessage(text: string, participantName?: string): void {
+  private normalizeParticipantName(participantName?: string): string {
+    return typeof participantName === "string" ? participantName.trim() : "";
+  }
+
+  private bindClient(participantName: string, ws: WebSocket): void {
+    const previous = this.participantByClient.get(ws);
+    if (previous && previous !== participantName) {
+      const previousSet = this.clientsByParticipant.get(previous);
+      previousSet?.delete(ws);
+      if (previousSet && previousSet.size === 0) {
+        this.clientsByParticipant.delete(previous);
+      }
+    }
+
+    let group = this.clientsByParticipant.get(participantName);
+    if (!group) {
+      group = new Set<WebSocket>();
+      this.clientsByParticipant.set(participantName, group);
+    }
+    group.add(ws);
+    this.participantByClient.set(ws, participantName);
+  }
+
+  private unbindClient(ws: WebSocket): void {
+    const participantName = this.participantByClient.get(ws);
+    if (!participantName) return;
+
+    this.participantByClient.delete(ws);
+    const group = this.clientsByParticipant.get(participantName);
+    group?.delete(ws);
+    if (group && group.size === 0) {
+      this.clientsByParticipant.delete(participantName);
+    }
+  }
+
+  private handleChatMessage(text: string, participantName: string | undefined, ws: WebSocket): void {
     if (!this.ctx || !text.trim()) return;
 
-    const name = participantName?.trim() || "用户";
+    const routeName = this.normalizeParticipantName(participantName);
+    if (!routeName) {
+      this.ctx.log("warn", "Webchat 上行消息缺少 participantName，已拒绝");
+      return;
+    }
+    this.bindClient(routeName, ws);
 
     const tags: ContextTag[] = [
       { kind: "conv_type", value: "私聊", groupWith: false },
-      { kind: "chat_id", value: "console", groupWith: true, passToTool: true },
-      { kind: "participant", value: name, groupWith: false },
+      { kind: "chat_id", value: routeName, groupWith: true, passToTool: true },
+      { kind: "participant", value: routeName, groupWith: false },
     ];
 
     const msg: AcceptMessage = {
@@ -104,19 +147,38 @@ export class WebchatHandler implements EndpointHandler {
     });
   }
 
-  /** 保存 Ailo 回复并发送给客户端（历史由前端 localStorage 管理） */
-  recordAiloReply(text: string): void {
-    this.sendToClients(text);
+  /** 保存 Ailo 回复并发送给指定用户名（历史由前端 localStorage 管理） */
+  recordAiloReply(text: string, participantName: string): boolean {
+    return this.sendToParticipant(participantName, text);
   }
 
-  /** 供 MCP 工具调用的回复方法 */
-  sendToClients(text: string): void {
+  /** 供 MCP 工具调用的定向回复方法 */
+  sendToParticipant(participantName: string, text: string): boolean {
+    const routeName = this.normalizeParticipantName(participantName);
+    if (!routeName) {
+      this.ctx?.log("warn", "Webchat 下行消息缺少 participantName，已拒绝");
+      return false;
+    }
+
+    const group = this.clientsByParticipant.get(routeName);
+    if (!group || group.size === 0) {
+      this.ctx?.log("warn", `未找到用户名为 ${routeName} 的在线客户端，消息未发送`);
+      return false;
+    }
+
     const msg = JSON.stringify({ type: "reply", text });
-    for (const client of this.clients) {
+    let sent = 0;
+    for (const client of group) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(msg);
+        sent += 1;
       }
     }
+    if (sent === 0) {
+      this.ctx?.log("warn", `用户名 ${routeName} 的连接均不可写，消息未发送`);
+      return false;
+    }
+    return true;
   }
 
   async stop(): Promise<void> {
@@ -124,6 +186,8 @@ export class WebchatHandler implements EndpointHandler {
       client.close();
     }
     this.clients.clear();
+    this.clientsByParticipant.clear();
+    this.participantByClient.clear();
 
     if (this.wss) {
       this.wss.close();

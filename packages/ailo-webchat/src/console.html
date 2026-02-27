@@ -116,6 +116,12 @@
       gap: 20px;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
     .status {
       font-size: 13px;
       color: var(--text-secondary);
@@ -174,6 +180,32 @@
       width: 16px;
       height: 16px;
       color: var(--accent);
+    }
+
+    .clear-history-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .clear-history-btn:hover:not(:disabled) {
+      border-color: rgba(245, 112, 112, 0.45);
+      color: #f8a7a7;
+      background: rgba(245, 112, 112, 0.1);
+    }
+
+    .clear-history-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     /* Chat Container */
@@ -608,12 +640,17 @@
         <span class="status-dot" id="status-dot"></span>
         <span id="status-text">连接中...</span>
       </div>
-      <div class="user-badge" id="user-badge" style="display: none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
-        </svg>
-        <span id="user-name-display"></span>
+      <div class="header-actions">
+        <button id="clear-history-btn" class="clear-history-btn" title="清空历史聊天记录">
+          清空聊天
+        </button>
+        <div class="user-badge" id="user-badge" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span id="user-name-display"></span>
+        </div>
       </div>
     </div>
   </header>
@@ -653,6 +690,7 @@
     const setupBtn = document.getElementById('setup-btn');
     const userBadge = document.getElementById('user-badge');
     const userNameDisplay = document.getElementById('user-name-display');
+    const clearHistoryBtn = document.getElementById('clear-history-btn');
 
     const STORAGE_KEY = 'ailo_webchat_chat';
     const STORAGE_KEY_NICKNAME = 'ailo_webchat_nickname';
@@ -698,6 +736,28 @@
         const trimmed = messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
       } catch (e) { console.warn('saveToStorage failed', e); }
+    }
+
+    function clearChatHistory() {
+      const hasMessages = loadFromStorage().length > 0;
+      if (!hasMessages) return;
+
+      const confirmed = window.confirm('确认清空所有历史聊天记录吗？此操作不可恢复。');
+      if (!confirmed) return;
+
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (e) {
+        console.warn('clearChatHistory failed', e);
+      }
+
+      chatContainer.querySelectorAll('.message').forEach(el => el.remove());
+      emptyState.style.display = 'flex';
+      updateClearButtonState();
+    }
+
+    function updateClearButtonState() {
+      clearHistoryBtn.disabled = loadFromStorage().length === 0;
     }
 
     function getInitials(name) {
@@ -811,6 +871,7 @@
       
       chatContainer.appendChild(div);
       chatContainer.scrollTop = chatContainer.scrollHeight;
+      updateClearButtonState();
     }
 
     function addMessage(sender, text) {
@@ -819,7 +880,10 @@
 
     function renderFromStorage() {
       const msgs = loadFromStorage();
-      if (!msgs.length) return;
+      if (!msgs.length) {
+        updateClearButtonState();
+        return;
+      }
       emptyState.style.display = 'none';
       chatContainer.querySelectorAll('.message').forEach(el => el.remove());
       
@@ -842,6 +906,7 @@
         chatContainer.appendChild(div);
       }
       chatContainer.scrollTop = chatContainer.scrollHeight;
+      updateClearButtonState();
     }
 
     function escapeHtml(text) {
@@ -851,6 +916,7 @@
     }
 
     sendBtn.addEventListener('click', sendMessage);
+    clearHistoryBtn.addEventListener('click', clearChatHistory);
 
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -866,6 +932,7 @@
 
     initNicknameUI();
     renderFromStorage();
+    updateClearButtonState();
     connect();
   </script>
 </body>

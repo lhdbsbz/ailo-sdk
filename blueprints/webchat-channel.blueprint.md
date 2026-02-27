@@ -10,14 +10,15 @@ tools:
       type: object
       properties:
         text: { type: string, description: 消息正文 }
-      required: [text]
+        participantName: { type: string, description: 目标使用者名称（路由主键） }
+      required: [text, participantName]
 ---
 
 ## 端点说明
 
 网页聊天通道，提供基于浏览器的实时聊天界面。用户通过网页端发送消息，系统接收后进行处理并返回响应。
 
-每个网页会话对应一个独立的 `chat_id`，由系统在用户首次访问时自动生成。
+每个使用者名称对应一个独立的 `chat_id`（使用 `participantName` 作为路由键）。
 
 ## 使用场景
 
@@ -28,9 +29,10 @@ tools:
 
 ### send — 发送消息
 
-向当前网页聊天会话发送文本消息，实时显示在用户的浏览器界面中。
+按 `participantName` 定向发送文本消息，实时显示在对应用户的浏览器界面中。
 
 ## 约束
 
 - 仅支持纯文本消息
-- 会话生命周期与浏览器连接绑定，用户关闭页面后会话结束
+- `participantName` 为必填；缺失时消息会被拒绝发送
+- 同名用户共享同一路由（会同时收到消息）

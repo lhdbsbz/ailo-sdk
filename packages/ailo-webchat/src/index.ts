@@ -18,8 +18,19 @@ runEndpoint({
   instructions: "网页聊天通道。用户通过 Web 界面对话。",
   toolHandlers: {
     send: async (args: Record<string, unknown>) => {
-      handler.recordAiloReply(args.text as string);
-      return "已发送消息到网页聊天界面";
+      const text = typeof args.text === "string" ? args.text.trim() : "";
+      const participantName =
+        typeof args.participantName === "string" ? args.participantName.trim() : "";
+
+      if (!text) {
+        return "发送失败：text 不能为空";
+      }
+      if (!participantName) {
+        return "发送失败：participantName 必填";
+      }
+
+      const ok = handler.recordAiloReply(text, participantName);
+      return ok ? "已发送消息到网页聊天界面" : "发送失败：未找到对应用户名在线连接";
     },
   },
 });

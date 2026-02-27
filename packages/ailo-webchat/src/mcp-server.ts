@@ -8,6 +8,7 @@ import type { WebchatHandler } from "./webchat-handler.js";
 type ConsoleToolArgs = {
   action: "send";
   text: string;
+  participantName: string;
 };
 
 export function createWebchatMcpServer(handler: WebchatHandler): McpServer {
@@ -20,14 +21,35 @@ export function createWebchatMcpServer(handler: WebchatHandler): McpServer {
       inputSchema: {
         action: z.enum(["send"]),
         text: z.string().describe("要发送的文本内容"),
+        participantName: z.string().min(1).describe("目标使用者名称（路由主键）"),
       },
     },
     async (args: ConsoleToolArgs) => {
       if (args.action === "send") {
-        handler.recordAiloReply(args.text);
+        const text = args.text.trim();
+        const participantName = args.participantName.trim();
+        if (!text) {
+          return {
+            content: [{ type: "text" as const, text: "发送失败：text 不能为空" }],
+            isError: true,
+          };
+        }
+        if (!participantName) {
+          return {
+            content: [{ type: "text" as const, text: "发送失败：participantName 必填" }],
+            isError: true,
+          };
+        }
+
+        const ok = handler.recordAiloReply(text, participantName);
         return {
-          content: [{ type: "text" as const, text: "已发送消息到网页聊天界面" }],
-          isError: false,
+          content: [
+            {
+              type: "text" as const,
+              text: ok ? "已发送消息到网页聊天界面" : "发送失败：未找到对应用户名在线连接",
+            },
+          ],
+          isError: !ok,
         };
       }
       return {
