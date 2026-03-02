@@ -1,7 +1,6 @@
 # @lmcl/ailo-mcp-email
 
-Ailo 邮件通道 MCP：IMAP 收信 + SMTP 发信。
-
+Ailo 邮件通道：IMAP 收信 + SMTP 发信。**自带配置界面**：启动后打开网页填写邮件与 Ailo 连接信息，保存即可生效。
 
 ## 配置
 
@@ -17,9 +16,14 @@ Ailo 邮件通道 MCP：IMAP 收信 + SMTP 发信。
 | SMTP_PASSWORD | 否 | 不填则用 IMAP_PASSWORD |
 | TLS_REJECT_UNAUTHORIZED | 否 | 默认 true 验证证书；自签名可设为 false |
 
+配置通过两种方式提供：
+
+1. **网页配置界面**（推荐）：启动后访问 http://127.0.0.1:19803 ，填写并保存后自动生效，配置存储在 `config.json`
+2. **环境变量**：通过 `IMAP_HOST` 等注入，优先级高于 config.json，适合容器化部署
+
 ## 在 Ailo 中添加
 
-通过 **Ailo 端点管理后台** 配置并添加（与 MCP 分离，不走 mcp_manage）：
+通过 **Ailo 端点管理后台** 配置并添加：
 
 1. 在 Ailo 管理端「端点密钥」创建 API Key
 2. 在「端点配置」添加端点：endpoint_id=email，command=npx，args=[@lmcl/ailo-mcp-email]，选择密钥，env 填入 IMAP_HOST、IMAP_USER、IMAP_PASSWORD 等
@@ -27,19 +31,9 @@ Ailo 邮件通道 MCP：IMAP 收信 + SMTP 发信。
 
 ## 本地开发
 
-创建 `.env` 文件，填入配置后启动：
-
 ```bash
-# .env 示例（必填：IMAP_HOST、IMAP_USER、IMAP_PASSWORD）
-IMAP_HOST=imap.qq.com
-IMAP_PORT=993
-IMAP_USER=your@email.com
-IMAP_PASSWORD=your_auth_code
-# SMTP_HOST=...
-# SMTP_PORT=465
-# TLS_REJECT_UNAUTHORIZED=false  # 自签名证书时
-
 npm install
 npm run build
 npm start
+# 打开 http://127.0.0.1:19803 填写配置
 ```

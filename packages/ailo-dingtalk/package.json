@@ -14,8 +14,7 @@
   },
   "dependencies": {
     "dingtalk-stream": "^2.0.4",
-    "@lmcl/ailo-endpoint-sdk": "*",
-    "dotenv": "^16.4.5"
+    "@lmcl/ailo-endpoint-sdk": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

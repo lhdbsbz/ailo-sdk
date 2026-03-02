@@ -1,12 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { AcceptMessage, ContextTag } from "@lmcl/ailo-endpoint-sdk";
-import { textPart } from "@lmcl/ailo-endpoint-sdk";
+import { textPart, readConfig, writeConfig, mergeWithEnv, AILO_ENV_MAPPING, getNestedValue, setNestedValue } from "@lmcl/ailo-endpoint-sdk";
+import type { EnvMapping } from "@lmcl/ailo-endpoint-sdk";
 import type { LocalMCPManager } from "./mcp_manager.js";
 import type { SkillsManager } from "./skills_manager.js";
 
@@ -31,8 +32,8 @@ interface ConfigServerDeps {
   skillsManager: SkillsManager;
   getConnectionStatus: () => { connected: boolean; endpointId: string; displayName: string };
   port: number;
-  /** When set, enables GET/POST /api/connection to read/write .env for Ailo connection config */
-  envFilePath?: string;
+  /** config.json path for Ailo connection config */
+  configPath?: string;
   /** 蓝图的 URL（与上报给 Ailo 的 blueprints 一致），用于 GET /api/tools 解析内置工具 */
   blueprintUrl?: string;
   /** 远程蓝图 404 时的本地回退路径（绝对路径或相对 cwd） */
@@ -45,7 +46,7 @@ interface ConfigServerDeps {
   onWebchatReady?: (api: { recordAiloReply: (text: string, participantName: string) => boolean }) => void;
   /** 请求热重连以刷新云端 Skills 列表（启用/禁用后调用，无需重启） */
   onRequestReconnect?: () => Promise<void>;
-  /** 保存 Ailo 连接配置后调用（新配置已写入 .env），用于断线后使用新配置重连 */
+  /** 保存 Ailo 连接配置后调用，用于断线后使用新配置重连 */
   onConnectionConfigSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>;
 }
 
@@ -163,10 +164,10 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
       if (path === "/api/env/install" && req.method === "POST") return json(res, await runEnvInstall());
       if (path === "/api/tools" && req.method === "GET") return json(res, await getReportedTools(deps));
       if (path === "/api/blueprint" && req.method === "GET") return json(res, await getBlueprintInfo(deps));
-      // Ailo 连接配置（仅当 envFilePath 存在时，供桌面端在界面填写并保存）
-      if (deps.envFilePath) {
-        if (path === "/api/connection" && req.method === "GET") return json(res, getConnectionConfig(deps.envFilePath));
-        if (path === "/api/connection" && req.method === "POST") return json(res, await saveConnectionConfig(deps.envFilePath, await body(req), deps.onConnectionConfigSaved));
+      // Ailo 连接配置（仅当 configPath 存在时，供桌面端在界面填写并保存）
+      if (deps.configPath) {
+        if (path === "/api/connection" && req.method === "GET") return json(res, getConnectionConfig(deps.configPath));
+        if (path === "/api/connection" && req.method === "POST") return json(res, await saveConnectionConfig(deps.configPath, await body(req), deps.onConnectionConfigSaved));
       }
       // MCP
       if (path === "/api/mcp" && req.method === "GET") return json(res, getMCPList(deps.mcpManager));
@@ -552,64 +553,51 @@ function getMCPList(mgr: LocalMCPManager) {
 
 function serveUI(res: ServerResponse, deps: ConfigServerDeps): void {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(getUIHTML(!!deps.envFilePath));
+  res.end(getUIHTML(!!deps.configPath));
 }
 
-function parseEnvFile(filePath: string): Record<string, string> {
-  if (!existsSync(filePath)) return {};
-  const content = readFileSync(filePath, "utf-8");
-  const out: Record<string, string> = {};
-  for (const line of content.split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (!m) continue;
-    let val = m[2].trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
-    out[m[1]] = val;
-  }
-  return out;
-}
-
-function getConnectionConfig(envFilePath: string): {
+function getConnectionConfig(configPath: string): {
   configured: boolean;
   ailoWsUrl?: string;
   ailoApiKey?: string;
   endpointId?: string;
   displayName?: string;
 } {
-  const env = parseEnvFile(envFilePath);
-  const url = env.AILO_WS_URL ?? "";
-  const key = env.AILO_API_KEY ?? "";
-  const id = env.AILO_ENDPOINT_ID ?? "";
+  const cfg = readConfig(configPath);
+  const { merged } = mergeWithEnv(cfg, AILO_ENV_MAPPING);
+  const url = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+  const key = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+  const id = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
   const configured = !!(url && key && id);
   return {
     configured,
     ailoWsUrl: url || undefined,
     ailoApiKey: key || undefined,
     endpointId: id || undefined,
-    displayName: env.DISPLAY_NAME || undefined,
+    displayName: (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) || undefined,
   };
 }
 
 async function saveConnectionConfig(
-  envFilePath: string,
+  configPath: string,
   bodyStr: string,
   onSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>,
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   try {
     const bodyTrimmed = (bodyStr ?? "").trim();
     if (!bodyTrimmed) return { ok: false, error: "请求体为空" };
-    const env = parseEnvFile(envFilePath);
+    const existing = readConfig(configPath) as Record<string, unknown>;
     const b = JSON.parse(bodyTrimmed) as { ailoWsUrl?: string; ailoApiKey?: string; endpointId?: string; displayName?: string };
-    if (b.ailoWsUrl !== undefined) env.AILO_WS_URL = b.ailoWsUrl;
-    if (b.ailoApiKey !== undefined) env.AILO_API_KEY = b.ailoApiKey;
-    if (b.endpointId !== undefined) env.AILO_ENDPOINT_ID = b.endpointId;
-    if (b.displayName !== undefined) env.DISPLAY_NAME = b.displayName;
-    const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
-    writeFileSync(envFilePath, lines.join("\n") + "\n", "utf-8");
-    const ailoWsUrl = env.AILO_WS_URL ?? "";
-    const ailoApiKey = env.AILO_API_KEY ?? "";
-    const endpointId = env.AILO_ENDPOINT_ID ?? "";
-    const displayName = env.DISPLAY_NAME;
+    if (b.ailoWsUrl !== undefined) setNestedValue(existing, "ailo.wsUrl", b.ailoWsUrl);
+    if (b.ailoApiKey !== undefined) setNestedValue(existing, "ailo.apiKey", b.ailoApiKey);
+    if (b.endpointId !== undefined) setNestedValue(existing, "ailo.endpointId", b.endpointId);
+    if (b.displayName !== undefined) setNestedValue(existing, "ailo.displayName", b.displayName);
+    writeConfig(configPath, existing);
+    const { merged } = mergeWithEnv(existing, AILO_ENV_MAPPING);
+    const ailoWsUrl = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+    const ailoApiKey = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+    const endpointId = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
+    const displayName = (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) ?? undefined;
     if (onSaved && ailoWsUrl && ailoApiKey && endpointId) {
       await onSaved({ ailoWsUrl, ailoApiKey, endpointId, displayName });
       return { ok: true, message: "已保存，正在使用新配置重连…" };

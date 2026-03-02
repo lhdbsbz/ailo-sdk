@@ -6,6 +6,7 @@
 import { get as httpsGet } from "https";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
+import { readConfig } from "@lmcl/ailo-endpoint-sdk";
 
 export interface SkillBundle {
   name: string;
@@ -72,7 +73,8 @@ async function fetchClawhub(url: string): Promise<SkillBundle> {
   const u = new URL(url);
   const slug = u.pathname.split("/").filter(Boolean).pop();
   if (!slug) throw new Error("clawhub URL must contain a slug");
-  const hubBase = process.env.COPAW_SKILLS_HUB_BASE_URL ?? "https://clawhub.ai";
+  const cfg = readConfig(join(process.cwd(), "config.json")) as Record<string, unknown>;
+  const hubBase = (process.env.COPAW_SKILLS_HUB_BASE_URL || cfg.skillsHubBaseUrl as string) ?? "https://clawhub.ai";
   const meta = await httpJson(`${hubBase}/api/v1/skills/${slug}`) as any;
   const repoUrl = meta.repo_url ?? meta.github_url;
   if (!repoUrl) throw new Error(`No repo_url found for skill ${slug}`);
@@ -187,7 +189,8 @@ function httpJson(url: string): Promise<unknown> {
 function httpText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { "User-Agent": "ailo-desktop/1.0" };
-    const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    const cfg = readConfig(join(process.cwd(), "config.json")) as Record<string, unknown>;
+    const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || (cfg.githubToken as string) || "";
     if (ghToken && url.includes("api.github.com")) headers.Authorization = `token ${ghToken}`;
 
     const doReq = (reqUrl: string, redirects = 0) => {

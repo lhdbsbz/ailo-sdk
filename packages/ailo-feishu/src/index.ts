@@ -1,86 +1,80 @@
 #!/usr/bin/env node
 /**
  * Ailo 飞书 Channel — 自带配置界面：打开网页填写飞书应用 + Ailo 连接信息，保存后生效。
- * 流程仿照 ailo-desktop：先起配置服务，有完整配置则连接；保存后重连或首次连接。
+ * 先起配置服务，有完整配置则连接；保存后重连或首次连接。
  */
 
-import { config as loadEnv } from "dotenv";
 import {
   runEndpoint,
+  startChannelConfigServer,
+  readConfig,
+  mergeWithEnv,
+  hasValidConfig,
+  backoffDelayMs,
+  AILO_ENV_MAPPING,
   type EndpointContext,
   type EndpointClient,
+  type AiloConnectionConfig,
+  type EnvMapping,
 } from "@lmcl/ailo-endpoint-sdk";
 import { join } from "path";
 import { FeishuHandler } from "./feishu-handler.js";
-import { startConfigServer } from "./config_server.js";
 
-loadEnv();
-
-const envFilePath = join(process.cwd(), ".env");
-const rawPort = Number(process.env.CONFIG_PORT ?? 19802);
-const CONFIG_PORT =
-  Number.isFinite(rawPort) && rawPort > 0 && rawPort < 65536 ? rawPort : 19802;
+const CONFIG_PORT = Number(process.env.CONFIG_PORT) || 19802;
+const configPath = join(process.cwd(), "config.json");
 const BLUEPRINT_FEISHU_URL =
   process.env.BLUEPRINT_FEISHU_URL ??
   "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/feishu-channel.blueprint.md";
 
-/** 从 .env 读取 Ailo 连接配置 */
-function loadAiloConfig(): { url: string; apiKey: string; endpointId: string; displayName?: string } {
-  loadEnv({ path: envFilePath });
+interface FeishuConfig {
+  ailo: { wsUrl: string; apiKey: string; endpointId: string; displayName?: string };
+  feishu: { appId: string; appSecret: string };
+}
+
+const ENV_MAPPING: EnvMapping[] = [
+  ...AILO_ENV_MAPPING,
+  { envVar: "FEISHU_APP_ID", configPath: "feishu.appId" },
+  { envVar: "FEISHU_APP_SECRET", configPath: "feishu.appSecret" },
+];
+
+function loadConfig(): FeishuConfig {
+  const raw = readConfig<FeishuConfig>(configPath);
+  const { merged } = mergeWithEnv<FeishuConfig>(raw, ENV_MAPPING);
+  return merged;
+}
+
+function getAiloConnection(cfg: FeishuConfig): AiloConnectionConfig {
   return {
-    url: process.env.AILO_WS_URL ?? "",
-    apiKey: process.env.AILO_API_KEY ?? "",
-    endpointId: process.env.AILO_ENDPOINT_ID ?? "",
-    displayName: process.env.DISPLAY_NAME,
+    url: cfg.ailo?.wsUrl ?? "",
+    apiKey: cfg.ailo?.apiKey ?? "",
+    endpointId: cfg.ailo?.endpointId ?? "",
+    displayName: cfg.ailo?.displayName,
   };
 }
 
-function hasValidAiloConfig(c: { url: string; apiKey: string; endpointId: string }): boolean {
-  return !!(c.url && c.apiKey && c.endpointId);
-}
-
-function hasValidFeishuConfig(): boolean {
-  loadEnv({ path: envFilePath });
-  const appId = process.env.FEISHU_APP_ID ?? "";
-  const appSecret = process.env.FEISHU_APP_SECRET ?? "";
-  return !!(appId && appSecret);
-}
-
-/** 退避延迟（毫秒） */
-function backoffDelayMs(attempt: number): number {
-  const base = 1000;
-  const max = 60_000;
-  const raw = Math.min(base * 2 ** attempt, max);
-  const jitter = raw * 0.1 * (Math.random() * 2 - 1);
-  return Math.max(100, Math.round(raw + jitter));
+function hasValidFeishuConfig(cfg: FeishuConfig): boolean {
+  return !!(cfg.feishu?.appId && cfg.feishu?.appSecret);
 }
 
 const connectionState = {
   connected: false,
   endpointId: "",
-  displayName: process.env.DISPLAY_NAME ?? "飞书",
+  displayName: "飞书",
 };
 
 let endpointCtxRef: EndpointContext | null = null;
 let connectAttempt = 0;
-/** 防止在首次连接成功前多次保存导致重复 runEndpoint */
 let connectionPending = false;
-/** 当前端点的 stop，用于保存配置后先断开再用新配置重连（飞书 + Ailo 一并生效） */
 let currentStop: (() => Promise<void>) | null = null;
 
-async function applyConnection(ailoOverrides?: {
-  url: string;
-  apiKey: string;
-  endpointId: string;
-  displayName?: string;
-}): Promise<void> {
-  loadEnv({ path: envFilePath });
-  const appId = process.env.FEISHU_APP_ID ?? "";
-  const appSecret = process.env.FEISHU_APP_SECRET ?? "";
-  const ailo = ailoOverrides ?? loadAiloConfig();
+async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> {
+  const cfg = loadConfig();
+  const appId = cfg.feishu?.appId ?? "";
+  const appSecret = cfg.feishu?.appSecret ?? "";
+  const ailo = overrides ?? getAiloConnection(cfg);
 
   if (!appId || !appSecret) return;
-  if (!hasValidAiloConfig(ailo)) return;
+  if (!hasValidConfig(ailo)) return;
   if (connectionPending) return;
 
   connectionPending = true;
@@ -126,7 +120,6 @@ async function applyConnection(ailoOverrides?: {
           const atts = ((args.attachments as any[]) ?? []).map((a: any) => ({
             type: a.type,
             file_path: a.path,
-            base64: a.base64,
             mime: a.mime,
             name: a.name,
             duration: a.duration,
@@ -136,11 +129,11 @@ async function applyConnection(ailoOverrides?: {
         },
       },
       onConnectFailure: async (err: Error, client: EndpointClient) => {
-        const latest = loadAiloConfig();
-        if (!hasValidAiloConfig(latest)) {
-          console.error("[feishu] Ailo 连接配置不完整，请于配置页填写 AILO_WS_URL、AILO_API_KEY、AILO_ENDPOINT_ID 后保存并重启进程。");
+        const latest = getAiloConnection(loadConfig());
+        if (!hasValidConfig(latest)) {
+          console.error("[feishu] Ailo 连接配置不完整，请于配置页填写后保存。");
           connectionPending = false;
-          process.exit(1);
+          return;
         }
         const delay = backoffDelayMs(connectAttempt++);
         console.error(
@@ -162,16 +155,22 @@ async function applyConnection(ailoOverrides?: {
 }
 
 async function main(): Promise<void> {
-  startConfigServer({
-    port: CONFIG_PORT,
-    envFilePath,
+  startChannelConfigServer({
+    channelName: "飞书",
+    defaultPort: CONFIG_PORT,
+    configPath,
+    platformFields: [
+      { key: "feishu.appId", label: "飞书 App ID", envVar: "FEISHU_APP_ID", placeholder: "cli_xxx", required: true },
+      { key: "feishu.appSecret", label: "飞书 App Secret", envVar: "FEISHU_APP_SECRET", type: "password", placeholder: "应用密钥", required: true },
+    ],
+    envMapping: ENV_MAPPING,
     getConnectionStatus: () => connectionState,
     onConfigSaved: async (config) => {
-      const ailo = {
-        url: config.ailoWsUrl,
-        apiKey: config.ailoApiKey,
-        endpointId: config.endpointId,
-        displayName: config.displayName,
+      const ailo: AiloConnectionConfig = {
+        url: (config as any).ailo?.wsUrl ?? "",
+        apiKey: (config as any).ailo?.apiKey ?? "",
+        endpointId: (config as any).ailo?.endpointId ?? "",
+        displayName: (config as any).ailo?.displayName,
       };
       if (endpointCtxRef && currentStop) {
         endpointCtxRef.client.close();
@@ -185,12 +184,10 @@ async function main(): Promise<void> {
     },
   });
 
-  loadEnv({ path: envFilePath });
-  const feishuOk = hasValidFeishuConfig();
-  const ailoCfg = loadAiloConfig();
-  const ailoOk = hasValidAiloConfig(ailoCfg);
+  const cfg = loadConfig();
+  const ailo = getAiloConnection(cfg);
 
-  if (feishuOk && ailoOk) {
+  if (hasValidFeishuConfig(cfg) && hasValidConfig(ailo)) {
     await applyConnection();
   } else {
     console.log("[feishu] 未检测到完整配置，请打开配置页填写飞书应用与 Ailo 连接信息并保存。");

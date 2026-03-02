@@ -204,6 +204,36 @@ tools:
         prompt_text: { type: string, description: "prompt 对话框输入（action=handle_dialog）" }
       required: [action]
 
+  - name: mouse_keyboard
+    description: 控制鼠标和键盘进行桌面 GUI 操作。支持像素坐标(x/y)和 UI-TARS 归一化坐标(norm_x/norm_y, 0-1000)。操作后可自动截图验证
+    timeout: 10
+    parameters:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [click, double_click, right_click, move, drag, type, hotkey, scroll, get_screen_size]
+          description: "操作类型"
+        x: { type: number, description: "X 像素坐标" }
+        y: { type: number, description: "Y 像素坐标" }
+        norm_x: { type: number, description: "UI-TARS 归一化 X 坐标 (0-1000)" }
+        norm_y: { type: number, description: "UI-TARS 归一化 Y 坐标 (0-1000)" }
+        button: { type: string, enum: [left, right, middle], description: "鼠标按键（默认 left）" }
+        start_x: { type: number, description: "拖拽起点 X 像素" }
+        start_y: { type: number, description: "拖拽起点 Y 像素" }
+        end_x: { type: number, description: "拖拽终点 X 像素" }
+        end_y: { type: number, description: "拖拽终点 Y 像素" }
+        start_norm_x: { type: number, description: "拖拽起点归一化 X" }
+        start_norm_y: { type: number, description: "拖拽起点归一化 Y" }
+        end_norm_x: { type: number, description: "拖拽终点归一化 X" }
+        end_norm_y: { type: number, description: "拖拽终点归一化 Y" }
+        text: { type: string, description: "输入文本（action=type）" }
+        keys: { type: string, description: "快捷键组合，空格分隔（如 ctrl c）" }
+        direction: { type: string, enum: [up, down], description: "滚动方向" }
+        amount: { type: number, description: "滚动量（默认 3）" }
+        screenshot_after: { type: boolean, description: "操作后自动截图（默认 false）" }
+      required: [action]
+
   - name: send_file
     description: 将本地文件发送给当前对话用户
     timeout: 30
@@ -259,6 +289,18 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 优先使用 `ref` 而非 CSS 选择器，因为 ref 在 snapshot 后是稳定的。
 
 **可见模式**：当用户需要看到浏览器的实际操作过程时，使用 `browser_use(action="start", headed=true)` 启动。桌面上会出现真实 Chromium 窗口，后续 open、click、type 等操作都在该窗口中执行，用户可实时观看。适用场景：演示或观察自动化过程、调试网页交互、需用户介入的半自动（如验证码）。可见模式下 PDF 导出不可用；若浏览器已在无头模式运行，传入 `headed=true` 会重启为可见模式。
+
+### mouse_keyboard
+控制桌面鼠标和键盘，用于 GUI 自动化操作。支持两种坐标输入：
+- 像素坐标（`x`/`y`）：直接指定屏幕像素位置
+- 归一化坐标（`norm_x`/`norm_y`，0-1000）：由 UI-TARS 等视觉模型输出，工具内自动转换为实际像素
+
+典型 GUI 操作流程：
+1. `screenshot`：截取当前屏幕
+2. `gui_operate(intent="点击确认按钮")`：分析截图，获取精确坐标
+3. `mouse_keyboard(action=click, norm_x=197, norm_y=525, screenshot_after=true)`：执行点击并自动截图验证
+
+`screenshot_after=true` 时操作完成后自动截图返回，可省去额外的 screenshot 调用。
 
 ### send_file
 将本地文件推送给当前对话用户。文件通过主动上行（endpoint.accept）直接发送给用户所在频道。

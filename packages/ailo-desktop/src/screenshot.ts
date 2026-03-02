@@ -33,19 +33,11 @@ export async function takeScreenshot(captureWindow = false): Promise<ContentPart
     return [{ type: "text", text: "截图失败：未能生成截图文件" }];
   }
 
-  const buf = fs.readFileSync(tmpPath);
-  fs.unlinkSync(tmpPath);
-
   return [
     { type: "text", text: captureWindow ? "窗口截图完成" : "截图完成" },
     {
       type: "image",
-      media: {
-        type: "image",
-        base64: buf.toString("base64"),
-        mime: "image/png",
-        name: "screenshot.png",
-      },
+      media: { type: "image", path: tmpPath, mime: "image/png", name: "screenshot.png" },
     },
   ];
 }

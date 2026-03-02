@@ -2,9 +2,12 @@
 
 export type MediaData = {
   type: string;
-  url?: string;
+  /** 统一文件引用 URI (ailo://blob/... 或 ailo://ep:...) — 主标识 */
+  fileRef?: string;
+  /** 本地文件路径（SDK 出站前自动上传到 Blob 并替换为 fileRef） */
   path?: string;
-  base64?: string;
+  /** 外部 URL（Discord CDN 等外部资源，保持原样） */
+  url?: string;
   mime?: string;
   name?: string;
 };
@@ -130,6 +133,29 @@ export type StreamPayload = {
   action: "start" | "chunk" | "end";
   text?: string;           // present when action="chunk"
   correlationId?: string;  // links to the accept/world_update that triggered the stream
+};
+
+/** Received via media_push event — consciousness pushes a blob to an endpoint */
+export type MediaPushPayload = {
+  file_ref: string;         // ailo://blob/... URI
+  url: string;              // HTTP download URL
+  mime: string;
+  name?: string;
+  message?: string;         // optional message from consciousness
+};
+
+/** Received via file_fetch request — Gateway asks endpoint to upload a local file */
+export type FileFetchRequest = {
+  path: string;             // local path on the endpoint
+  upload_url: string;       // Blob API upload URL
+};
+
+/** Response to file_fetch — endpoint returns after uploading */
+export type FileFetchResponse = {
+  blob_id: string;
+  file_ref: string;
+  mime: string;
+  size: number;
 };
 
 // ─── Tool handler ─────────────────────────────────────────────────────────────

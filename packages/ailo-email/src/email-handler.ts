@@ -14,6 +14,7 @@ import { simpleParser } from "mailparser";
 import type { ParsedMail } from "mailparser";
 import nodemailer from "nodemailer";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { type EndpointHandler, type AcceptMessage, type EndpointContext, type ContextTag, textPart, mediaPart } from "@lmcl/ailo-endpoint-sdk";
 import { getWorkDir } from "@lmcl/ailo-endpoint-sdk";
@@ -412,7 +413,7 @@ export class EmailHandler implements EndpointHandler {
     });
   }
 
-  async getAttachment(opts: { uid: number; folder?: string; filename: string }): Promise<string | null> {
+  async downloadAttachment(opts: { uid: number; folder?: string; filename: string }): Promise<string | null> {
     return this.withMailbox(opts.folder ?? "INBOX", async (imap) => {
       let raw: FetchMessageObject | false;
       try {
@@ -424,8 +425,15 @@ export class EmailHandler implements EndpointHandler {
 
       const parsed = await simpleParser(raw.source as Buffer);
       const att = parsed.attachments?.find((a) => (a.filename ?? "") === opts.filename);
-      if (!att?.content) return null;
-      return att.content.toString("base64");
+      if (!att?.content || !Buffer.isBuffer(att.content)) return null;
+
+      const workDir = getWorkDir() ?? os.tmpdir();
+      const outDir = path.join(workDir, "blobs");
+      await fs.promises.mkdir(outDir, { recursive: true });
+      const safeName = (att.filename ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const outPath = path.join(outDir, `${Date.now()}_${safeName}`);
+      await fs.promises.writeFile(outPath, att.content);
+      return outPath;
     });
   }
 

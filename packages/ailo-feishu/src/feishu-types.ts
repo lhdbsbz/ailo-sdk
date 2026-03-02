@@ -10,7 +10,6 @@ export type FeishuAttachment = {
   path?: string;
   ref?: string;
   channel?: string;
-  base64?: string;
   mime?: string;
   name?: string;
 };

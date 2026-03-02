@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import fs from "fs";
 import path from "path";
 import type {
   AcceptMessage,
@@ -9,10 +10,12 @@ import type {
   IntentPayload,
   ToolRequestPayload,
   StreamPayload,
+  MediaPushPayload,
   ToolCapability,
   SkillMeta,
   HealthStatus,
   EndpointStorage,
+  FileFetchRequest,
 } from "./types.js";
 
 const SDK_VERSION = "1.0.0";
@@ -63,6 +66,7 @@ export type WorldEnrichmentHandler = (payload: WorldEnrichmentPayload) => void;
 export type StreamHandler = (payload: StreamPayload) => void;
 export type SignalHandler = (signal: string, data: unknown) => void;
 export type EvictedHandler = () => void;
+export type MediaPushHandler = (payload: MediaPushPayload) => void | Promise<void>;
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +134,7 @@ export class EndpointClient implements EndpointStorage {
   private streamHandler: StreamHandler | null = null;
   private signalHandlers = new Map<string, SignalHandler[]>();
   private evictedHandler: EvictedHandler | null = null;
+  private mediaPushHandlers: MediaPushHandler[] = [];
 
   constructor(config: EndpointClientConfig) {
     this.cfg = config;
@@ -219,6 +224,12 @@ export class EndpointClient implements EndpointStorage {
     const list = this.signalHandlers.get(signal) ?? [];
     list.push(handler);
     this.signalHandlers.set(signal, list);
+    return this;
+  }
+
+  /** Register a handler for media_push events (consciousness pushes a blob to this endpoint). */
+  onMediaPush(handler: MediaPushHandler): this {
+    this.mediaPushHandlers.push(handler);
     return this;
   }
 
@@ -461,6 +472,22 @@ export class EndpointClient implements EndpointStorage {
         this.streamHandler?.(payload);
         break;
       }
+      case "media_push": {
+        const payload = frame.payload as MediaPushPayload;
+        for (const handler of this.mediaPushHandlers) {
+          Promise.resolve(handler(payload)).catch((err) => {
+            console.error("[endpoint] media_push handler error:", err);
+          });
+        }
+        break;
+      }
+      case "file_fetch": {
+        const reqId = frame.id;
+        if (!reqId) break;
+        const payload = frame.payload as FileFetchRequest;
+        void this.handleFileFetch(reqId, payload);
+        break;
+      }
       default:
         break;
     }
@@ -533,6 +560,36 @@ export class EndpointClient implements EndpointStorage {
       req.reject(err);
     }
     this.pending.clear();
+  }
+
+  private async handleFileFetch(reqId: string, payload: FileFetchRequest): Promise<void> {
+    try {
+      const localPath = payload.path;
+      if (!fs.existsSync(localPath)) {
+        await this.toolResponse({ id: reqId, success: false, error: `file not found: ${localPath}` });
+        return;
+      }
+      const fileBuffer = fs.readFileSync(localPath);
+      const fileName = path.basename(localPath);
+
+      const form = new FormData();
+      form.append("file", new Blob([fileBuffer]), fileName);
+
+      const res = await fetch(payload.upload_url, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        await this.toolResponse({ id: reqId, success: false, error: `upload failed: ${res.status}` });
+        return;
+      }
+      const result = await res.json() as Record<string, unknown>;
+      await this.toolResponse({ id: reqId, success: true, result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[endpoint] file_fetch error:", msg);
+      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
+    }
   }
 
   private scheduleReconnect(): void {

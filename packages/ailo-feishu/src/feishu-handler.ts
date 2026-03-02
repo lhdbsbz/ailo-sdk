@@ -171,7 +171,7 @@ export class FeishuHandler implements EndpointHandler {
     chatName?: string;
     mentionsSelf?: boolean;
     timestamp?: number;
-    attachments?: Array<{ type: string; path?: string; url?: string; base64?: string; mime?: string; name?: string }>;
+    attachments?: Array<{ type: string; path?: string; url?: string; mime?: string; name?: string }>;
   }): AcceptMessage {
     const { chatId, text, chatType, senderId = "", senderName = "", chatName, attachments } = opts;
     const isPrivate = chatType === "私聊";
@@ -204,7 +204,6 @@ export class FeishuHandler implements EndpointHandler {
           type: a.type ?? "file",
           path: a.path,
           url: a.url,
-          base64: a.base64,
           mime: a.mime,
           name: a.name,
         })
@@ -548,24 +547,16 @@ export class FeishuHandler implements EndpointHandler {
   }
 
   private async uploadFileToFeishu(opts: {
-    filePath?: string;
-    base64?: string;
+    filePath: string;
     fileName: string;
     fileType?: "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream";
     mime?: string;
     duration?: number;
   }): Promise<string> {
-    let fileData: Buffer;
-    if (opts.filePath) {
-      if (!fs.existsSync(opts.filePath)) {
-        throw new Error(`文件不存在: ${opts.filePath}`);
-      }
-      fileData = fs.readFileSync(opts.filePath);
-    } else if (opts.base64) {
-      fileData = Buffer.from(opts.base64, "base64");
-    } else {
-      throw new Error("文件上传失败：未提供 file_path 或 base64");
+    if (!fs.existsSync(opts.filePath)) {
+      throw new Error(`文件不存在: ${opts.filePath}`);
     }
+    const fileData = fs.readFileSync(opts.filePath);
     const fileType = opts.fileType ?? this.inferFileType(opts.fileName, opts.mime);
     let res: { file_key?: string };
     try {
@@ -587,22 +578,12 @@ export class FeishuHandler implements EndpointHandler {
   }
 
   private async uploadImageToFeishu(opts: {
-    filePath?: string;
-    base64?: string;
-    mime?: string;
+    filePath: string;
   }): Promise<string> {
-    let imageData: Buffer;
-
-    if (opts.filePath) {
-      if (!fs.existsSync(opts.filePath)) {
-        throw new Error(`图片文件不存在: ${opts.filePath}`);
-      }
-      imageData = fs.readFileSync(opts.filePath);
-    } else if (opts.base64) {
-      imageData = Buffer.from(opts.base64, "base64");
-    } else {
-      throw new Error("图片上传失败：未提供 file_path 或 base64");
+    if (!fs.existsSync(opts.filePath)) {
+      throw new Error(`图片文件不存在: ${opts.filePath}`);
     }
+    const imageData = fs.readFileSync(opts.filePath);
 
     let res: { image_key?: string };
     try {
@@ -631,7 +612,6 @@ export class FeishuHandler implements EndpointHandler {
     text: string,
     attachments?: Array<{
       type?: string;
-      base64?: string;
       url?: string;
       mime?: string;
       file_path?: string;
@@ -646,7 +626,7 @@ export class FeishuHandler implements EndpointHandler {
       const t = (a.type ?? "").toLowerCase();
       if (t === "image") return false;
       if (["file", "audio", "video"].includes(t)) return true;
-      return !!(a.file_path || a.base64);
+      return !!a.file_path;
     });
 
     if (!trimmed && imageAttachments.length === 0 && fileAttachments.length === 0) {
@@ -657,12 +637,8 @@ export class FeishuHandler implements EndpointHandler {
 
     const imageKeys: string[] = [];
     for (const att of imageAttachments) {
-      if (att.file_path || att.base64) {
-        const key = await this.uploadImageToFeishu({
-          filePath: att.file_path,
-          base64: att.base64,
-          mime: att.mime,
-        });
+      if (att.file_path) {
+        const key = await this.uploadImageToFeishu({ filePath: att.file_path });
         imageKeys.push(key);
       }
     }
@@ -707,12 +683,10 @@ export class FeishuHandler implements EndpointHandler {
     }
 
     for (const att of fileAttachments) {
-      if (!att.file_path && !att.base64) continue;
-      const fileName =
-        att.name?.trim() || (att.file_path ? path.basename(att.file_path) : `file_${Date.now()}`);
+      if (!att.file_path) continue;
+      const fileName = att.name?.trim() || path.basename(att.file_path);
       const fileKey = await this.uploadFileToFeishu({
         filePath: att.file_path,
-        base64: att.base64,
         fileName,
         mime: att.mime,
         duration: att.duration,

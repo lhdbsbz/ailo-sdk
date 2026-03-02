@@ -4,12 +4,13 @@
  */
 
 import { createInterface } from "readline";
-import { writeFile, mkdir } from "fs/promises";
+import { mkdir } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+import { writeConfig } from "@lmcl/ailo-endpoint-sdk";
 import { SkillsManager } from "./skills_manager.js";
 
-const ENV_PATH = join(process.cwd(), ".env");
+const CONFIG_PATH = join(process.cwd(), "config.json");
 const AGENTS_DIR = join(homedir(), ".agents");
 
 async function prompt(question: string, defaultVal = ""): Promise<string> {
@@ -31,15 +32,17 @@ export async function runInit(useDefaults = false): Promise<void> {
   const endpointId = useDefaults ? "desktop-01" : await prompt("端点 ID", "desktop-01");
   const displayName = useDefaults ? "桌面Agent" : await prompt("显示名称", "桌面Agent");
 
-  const envContent = [
-    `AILO_WS_URL=${wsUrl}`,
-    apiKey ? `AILO_API_KEY=${apiKey}` : `# AILO_API_KEY=`,
-    `AILO_ENDPOINT_ID=${endpointId}`,
-    `DISPLAY_NAME=${displayName}`,
-  ].join("\n") + "\n";
+  const config = {
+    ailo: {
+      wsUrl,
+      apiKey: apiKey || "",
+      endpointId,
+      displayName,
+    },
+  };
 
-  await writeFile(ENV_PATH, envContent, "utf-8");
-  console.log(`\n已写入 ${ENV_PATH}`);
+  writeConfig(CONFIG_PATH, config);
+  console.log(`\n已写入 ${CONFIG_PATH}`);
 
   await mkdir(AGENTS_DIR, { recursive: true });
   const skillsMgr = new SkillsManager();
@@ -49,5 +52,3 @@ export async function runInit(useDefaults = false): Promise<void> {
   console.log("\n初始化完成！运行 ailo-desktop 启动桌面端点。");
   console.log(`配置界面: http://127.0.0.1:19801`);
 }
-
-// 不在此处自执行：由 index.ts 在子命令 init 时 import 并调用 runInit，避免重复执行。

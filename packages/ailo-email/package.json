@@ -15,7 +15,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@lmcl/ailo-endpoint-sdk": "*",
-    "dotenv": "^16.4.5",
     "imapflow": "^1.2.10",
     "mailparser": "^3.6.6",
     "nodemailer": "^8.0.1",

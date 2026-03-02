@@ -14,14 +14,11 @@
   },
   "dependencies": {
     "@lmcl/ailo-endpoint-sdk": "*",
-    "dotenv": "^16.4.0",
     "glob": "^11.0.0",
-    "mime-types": "^2.1.35",
     "playwright": "^1.50.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/mime-types": "^2.1.4",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"

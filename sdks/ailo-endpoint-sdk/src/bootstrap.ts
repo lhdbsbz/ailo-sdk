@@ -10,25 +10,40 @@
  *   runEndpoint({ handler, displayName, caps: ["message","tool_execute"] });
  */
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { EndpointClient } from "./endpoint-client.js";
 import { loadSkills } from "./skill-loader.js";
+import { parseFileRef, isFileRef } from "./fileref.js";
+import { inferMime, classifyMedia } from "./media-util.js";
 import type {
   AcceptMessage,
+  ContentPart,
   EndpointStorage,
   HealthStatus,
   ToolHandler,
   ToolCapability,
   SkillMeta,
+  MediaPushPayload,
 } from "./types.js";
 
 export interface EndpointContext {
-  /** Submit a message (or perception signal) to Ailo */
+  /** Submit a message (or perception signal) to Ailo. Media with local paths are auto-uploaded to Blob. */
   accept(msg: AcceptMessage): Promise<void>;
   storage: EndpointStorage;
   reportHealth(status: HealthStatus, detail?: string): void;
   log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void;
   sendSignal(signal: string, data?: unknown): void;
   onSignal(signal: string, callback: (data: unknown) => void): void;
+  /** Upload a local file to Ailo's Blob store, returns FileRef URI (ailo://blob/...) */
+  uploadBlob(localPath: string): Promise<string>;
+  /** Resolve a FileRef URI or Blob HTTP URL to a local file path */
+  resolveToLocal(pathOrUrl: string): Promise<string>;
+  /** Send a local file to Ailo via Blob upload + accept. Returns the FileRef URI. */
+  sendFile(localPath: string, opts?: { requiresResponse?: boolean }): Promise<string>;
+  /** Register a handler for media_push events */
+  onMediaPush(handler: (payload: MediaPushPayload) => void | Promise<void>): void;
   client: EndpointClient;
 }
 
@@ -108,15 +123,6 @@ export function runEndpoint(config: EndpointConfig): void {
     skills,
   });
 
-  if (config.toolHandlers) {
-    const handlers = config.toolHandlers;
-    client.onToolRequest(async (req) => {
-      const fn = handlers[req.name];
-      if (!fn) throw new Error(`unknown tool: ${req.name}`);
-      return fn(req.args);
-    });
-  }
-
   const shutdown = (reason = "shutdown") => {
     console.log(`${tag} shutting down... (${reason})`);
     Promise.resolve(handler.stop()).catch(() => {});
@@ -133,14 +139,149 @@ export function runEndpoint(config: EndpointConfig): void {
   });
 
   (async () => {
+    const ailoHttpBase = deriveHttpBase(ailoWsUrl);
+    const blobUrlPrefix = `${ailoHttpBase}/api/blob/`;
+    const mediaPushHandlers: Array<(payload: MediaPushPayload) => void | Promise<void>> = [];
+
+    client.onMediaPush((payload) => {
+      for (const h of mediaPushHandlers) {
+        Promise.resolve(h(payload)).catch((err) => {
+          console.error(`${tag} media_push handler error:`, err);
+        });
+      }
+    });
+
+    // ── blob helpers ──
+
+    async function uploadBlob(localPath: string): Promise<string> {
+      const absPath = path.resolve(localPath);
+      const fileBuffer = fs.readFileSync(absPath);
+      const fileName = path.basename(absPath);
+      const form = new FormData();
+      form.append("file", new Blob([fileBuffer]), fileName);
+      const res = await fetch(`${ailoHttpBase}/api/blob/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ailoApiKey}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error(`blob upload failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { file_ref: string };
+      return json.file_ref;
+    }
+
+    async function downloadBlobToLocal(url: string): Promise<string> {
+      const tmpDir = path.join(os.tmpdir(), "ailo_blob");
+      fs.mkdirSync(tmpDir, { recursive: true });
+      const fileName = url.split("/").pop() || `blob_${Date.now()}`;
+      const tmpFile = path.join(tmpDir, `${Date.now()}_${fileName}`);
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${ailoApiKey}` } });
+      if (!res.ok) throw new Error(`blob download failed: ${res.status}`);
+      fs.writeFileSync(tmpFile, Buffer.from(await res.arrayBuffer()));
+      return tmpFile;
+    }
+
+    async function resolveToLocal(pathOrUrl: string): Promise<string> {
+      if (isFileRef(pathOrUrl)) {
+        const parsed = parseFileRef(pathOrUrl);
+        if (parsed.type === "endpoint" && parsed.endpointId === endpointId) return parsed.path!;
+        if (parsed.type === "blob") return downloadBlobToLocal(`${ailoHttpBase}/api/blob/${parsed.blobId}`);
+        return pathOrUrl;
+      }
+      if (pathOrUrl.startsWith(blobUrlPrefix)) return downloadBlobToLocal(pathOrUrl);
+      return pathOrUrl;
+    }
+
+    // ── auto-upload: path → blob → fileRef (outbound middleware) ──
+
+    async function autoUploadMedia(content: ContentPart[]): Promise<void> {
+      for (let i = 0; i < content.length; i++) {
+        const part = content[i];
+        if (!part.media?.path) continue;
+        const absPath = path.resolve(part.media.path);
+        if (!fs.existsSync(absPath)) {
+          throw new Error(`auto-upload: file not found: ${absPath}`);
+        }
+        const fileRef = await uploadBlob(absPath);
+        content[i] = {
+          ...part,
+          media: {
+            type: part.media.type,
+            fileRef,
+            mime: part.media.mime || inferMime(absPath),
+            name: part.media.name || path.basename(absPath),
+          },
+        };
+      }
+    }
+
+    // ── auto-resolve: blob URL → local path (inbound middleware) ──
+
+    async function resolveFileArgsInPlace(args: Record<string, unknown>): Promise<void> {
+      for (const [key, value] of Object.entries(args)) {
+        if (typeof value === "string" && value.startsWith(blobUrlPrefix)) {
+          try { args[key] = await downloadBlobToLocal(value); } catch { /* keep original */ }
+        } else if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            if (typeof value[i] === "string" && (value[i] as string).startsWith(blobUrlPrefix)) {
+              try { value[i] = await downloadBlobToLocal(value[i] as string); } catch { /* keep */ }
+            } else if (typeof value[i] === "object" && value[i] !== null) {
+              await resolveFileArgsInPlace(value[i] as Record<string, unknown>);
+            }
+          }
+        } else if (typeof value === "object" && value !== null) {
+          await resolveFileArgsInPlace(value as Record<string, unknown>);
+        }
+      }
+    }
+
+    function isContentParts(v: unknown): v is ContentPart[] {
+      return Array.isArray(v) && v.length > 0 && typeof v[0] === "object" && v[0] !== null && "type" in v[0];
+    }
+
+    // ── tool dispatch with middleware ──
+
+    if (config.toolHandlers) {
+      const handlers = config.toolHandlers;
+      client.onToolRequest(async (req) => {
+        const fn = handlers[req.name];
+        if (!fn) throw new Error(`unknown tool: ${req.name}`);
+        await resolveFileArgsInPlace(req.args);
+        const result = await fn(req.args);
+        if (isContentParts(result)) await autoUploadMedia(result);
+        return result;
+      });
+    }
+
+    // ── ctx ──
+
     const ctx: EndpointContext = {
-      accept: (msg) => client.accept(msg),
+      async accept(msg: AcceptMessage): Promise<void> {
+        await autoUploadMedia(msg.content);
+        return client.accept(msg);
+      },
       storage: client,
       reportHealth: (status, detail) => client.reportHealth(status, detail),
       log: (level, message, data) => client.sendLog(level, message, data),
       sendSignal: (signal, data) => client.sendSignal(signal, data),
       onSignal: (signal, callback) => {
         client.onSignal(signal, (_sig, data) => callback(data));
+      },
+      uploadBlob,
+      resolveToLocal,
+      async sendFile(localPath: string, opts?: { requiresResponse?: boolean }): Promise<string> {
+        const absPath = path.resolve(localPath);
+        const fileRef = await uploadBlob(absPath);
+        const mime = inferMime(absPath);
+        const mediaType = classifyMedia(mime);
+        await ctx.accept({
+          content: [{ type: mediaType, media: { type: mediaType, fileRef, mime, name: path.basename(absPath) } }],
+          contextTags: [],
+          requiresResponse: opts?.requiresResponse ?? false,
+        });
+        return fileRef;
+      },
+      onMediaPush(handler) {
+        mediaPushHandlers.push(handler);
       },
       client,
     };
@@ -171,10 +312,11 @@ export function runEndpoint(config: EndpointConfig): void {
   })();
 }
 
-/** @deprecated Use `EndpointConfig` instead. */
-export type McpEndpointConfig = EndpointConfig;
-
-/** @deprecated Use `runEndpoint` instead. */
-export function runMcpEndpoint(config: EndpointConfig): void {
-  return runEndpoint(config);
+/** Derive HTTP base URL from WebSocket URL (ws://host:port/ws → http://host:port) */
+function deriveHttpBase(wsUrl: string): string {
+  let base = wsUrl.replace(/\/ws\/?$/, "");
+  if (base.startsWith("wss://")) base = base.replace("wss://", "https://");
+  else if (base.startsWith("ws://")) base = base.replace("ws://", "http://");
+  return base;
 }
+

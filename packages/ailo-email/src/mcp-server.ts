@@ -216,13 +216,13 @@ export function createEmailMcpServer(handler: EmailHandler): McpServer {
           case "get_attachment": {
             if (args.uid === undefined || !args.filename)
               return err("get_attachment 需要 uid 和 filename");
-            const b64 = await handler.getAttachment({
+            const localPath = await handler.downloadAttachment({
               uid: args.uid,
               folder: args.folder,
               filename: args.filename,
             });
-            if (!b64) return err(`附件 ${args.filename} 不存在`);
-            return ok(`base64:${b64}`);
+            if (!localPath) return err(`附件 ${args.filename} 不存在`);
+            return ok(`附件已下载到 ${localPath}`);
           }
           default:
             return err(`未知 action: ${a}`);
