@@ -796,6 +796,9 @@
       userNameDisplay.textContent = name;
       userBadge.style.display = 'inline-flex';
       setupModal.classList.add('hidden');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'register', participantName: userName }));
+      }
     });
 
     function connect() {
@@ -821,6 +824,9 @@
         if (reconnectTimer) {
           clearTimeout(reconnectTimer);
           reconnectTimer = null;
+        }
+        if (userName) {
+          ws.send(JSON.stringify({ type: 'register', participantName: userName }));
         }
         renderFromStorage();
       };

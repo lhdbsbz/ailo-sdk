@@ -592,7 +592,7 @@ export class EmailHandler implements EndpointHandler {
           : "file";
         out.push({ type, path: outPath, mime, name: a.filename ?? filename });
       } catch {
-        // 落盘失败则跳过该附件
+        // skip this attachment on write failure
       }
     }
     return out;

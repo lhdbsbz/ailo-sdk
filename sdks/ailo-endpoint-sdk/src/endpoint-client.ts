@@ -37,7 +37,7 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;
 const OFFLINE_BUFFER_MAX = 200;
 
-/** 配置变更后重连前的冷却时间（秒级），避免抖动 */
+/** Cooldown before reconnecting after config change, to avoid thrashing */
 export const RECONNECT_COOLDOWN_MS = 1000;
 
 // ─── Internal frame types ─────────────────────────────────────────────────────
@@ -71,9 +71,9 @@ export type MediaPushHandler = (payload: MediaPushPayload) => void | Promise<voi
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export interface EndpointClientConfig {
-  /** WSS URL of the Ailo server, e.g. "wss://your-server.com/ws" */
+  /** WebSocket URL of the Ailo server, e.g. "wss://your-server.com/ws" */
   url: string;
-  /** Pre-created API key from the aido admin UI */
+  /** Pre-created API key from the Ailo admin dashboard */
   apiKey: string;
   /** Unique identifier for this endpoint, e.g. "robot-01" */
   endpointId: string;
@@ -83,21 +83,21 @@ export interface EndpointClientConfig {
   caps: string[];
   /**
    * Tools this endpoint can execute.
-   * Declared at connect so the agent knows which tool_request names to route here.
+   * Declared at connect time so the server knows which tool_request names to route here.
    * Only relevant when "tool_execute" is in caps.
    */
   tools?: ToolCapability[];
-  /** Optional system-level instructions injected into agent context */
+  /** Optional instructions describing this endpoint's environment or constraints */
   instructions?: string;
   /** Blueprint IDs to activate for this endpoint session */
   blueprints?: string[];
-  /** Skills loaded from local SKILL.md files, reported to the brain at connect time */
+  /** Skills loaded from local SKILL.md files, reported to the server at connect time */
   skills?: SkillMeta[];
   /** Max messages to buffer while disconnected (default: 200, 0 = disabled) */
   offlineBufferSize?: number;
 }
 
-/** 仅连接相关字段，用于热更新配置后重连（reconnect 第二参数） */
+/** Connection-only fields for hot-reloading config (passed as second arg to reconnect) */
 export type ConnectionOverrides = Partial<
   Pick<EndpointClientConfig, "url" | "apiKey" | "endpointId" | "displayName">
 >;
@@ -105,15 +105,16 @@ export type ConnectionOverrides = Partial<
 // ─── EndpointClient ───────────────────────────────────────────────────────────
 
 /**
- * EndpointClient connects any external endpoint (robot, feishu, camera, IoT, …)
- * to Ailo using the unified Endpoint protocol with API-key authentication.
+ * Connects any external endpoint (robot, Lark, camera, IoT, …) to an Ailo server
+ * using the unified Endpoint Protocol with API-key authentication.
  *
- * Usage:
- *   const client = new EndpointClient({ url, apiKey, endpointId, caps: ["world_update","tool_execute","intent"] });
- *   client.onToolRequest(async (req) => { ... return result; });
- *   client.onIntent((intent) => { ... });
- *   await client.connect();
- *   await client.worldUpdate({ mode: "aware", obstacles: [100,200,150] });
+ * @example
+ * ```ts
+ * const client = new EndpointClient({ url, apiKey, endpointId, caps: ["message", "tool_execute"] });
+ * client.onToolRequest(async (req) => { ... return result; });
+ * await client.connect();
+ * await client.accept({ content: [{ type: "text", text: "Hello" }], contextTags: [] });
+ * ```
  */
 export class EndpointClient implements EndpointStorage {
   private ws: WebSocket | null = null;
@@ -211,7 +212,7 @@ export class EndpointClient implements EndpointStorage {
   }
 
   /**
-   * Register a handler for streamed text chunks from the agent.
+   * Register a handler for streamed text output.
    * Called three times per stream: action="start", then one or more "chunk", then "end".
    */
   onStream(handler: StreamHandler): this {
@@ -227,7 +228,7 @@ export class EndpointClient implements EndpointStorage {
     return this;
   }
 
-  /** Register a handler for media_push events (consciousness pushes a blob to this endpoint). */
+  /** Register a handler for media_push events (server pushes a file to this endpoint). */
   onMediaPush(handler: MediaPushHandler): this {
     this.mediaPushHandlers.push(handler);
     return this;
@@ -244,10 +245,7 @@ export class EndpointClient implements EndpointStorage {
 
   // ─── Outbound methods ────────────────────────────────────────────────────────
 
-  /**
-   * Send a conversational message (requires caps: ["message"]).
-   * This calls the endpoint.accept method on the server.
-   */
+  /** Send a conversational message (requires cap: "message"). */
   async accept(msg: AcceptMessage): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       if (this.intentionalClose || this.offlineBufferMax <= 0) throw new Error("not connected");
@@ -259,18 +257,12 @@ export class EndpointClient implements EndpointStorage {
     await this.acceptDirect(msg);
   }
 
-  /**
-   * Send a world_update frame (requires caps: ["world_update"]).
-   * Carries sensor/perception data to the agent for scene understanding.
-   */
+  /** Send a world_update frame (requires cap: "world_update"). Carries sensor/perception data. */
   async worldUpdate(payload: WorldUpdatePayload): Promise<void> {
     await this.request("world_update", payload as unknown as Record<string, unknown>);
   }
 
-  /**
-   * Send a tool_response frame (requires caps: ["tool_execute"]).
-   * Call this after receiving and executing a tool_request.
-   */
+  /** Send a tool_response frame. Call this after receiving and executing a tool_request. */
   async toolResponse(payload: ToolResponsePayload): Promise<void> {
     await this.request("tool_response", payload as unknown as Record<string, unknown>);
   }
@@ -282,7 +274,7 @@ export class EndpointClient implements EndpointStorage {
     this.request("endpoint.health", params).catch(() => {});
   }
 
-  /** Send a log entry to the server (when local stdout is occupied). */
+  /** Forward a log entry to the server (useful when local stdout is occupied by MCP stdio). */
   sendLog(
     level: "debug" | "info" | "warn" | "error",
     message: string,
@@ -424,13 +416,13 @@ export class EndpointClient implements EndpointStorage {
         code === 1001 && reason?.toString().includes("replaced");
 
       if (isEvicted) {
-        // 被新实例顶掉，当前进程没有继续运行的意义，通知上层退出。
+        // Evicted by a newer instance — notify the handler and stop.
         this.intentionalClose = true;
         this.evictedHandler?.();
         return;
       }
 
-      // 如果触发 close 的不是当前活跃连接（极端竞态），直接忽略。
+      // Ignore close events from stale connections (rare race condition).
       if (ws !== this.ws) return;
 
       this.onDisconnect();

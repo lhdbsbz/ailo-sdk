@@ -44,7 +44,7 @@ interface ConfigServerDeps {
   getWebchatCtx?: () => EndpointContext | null;
   /** 网页聊天就绪后回调，供 index 的 send 工具使用 */
   onWebchatReady?: (api: { recordAiloReply: (text: string, participantName: string) => boolean }) => void;
-  /** 请求热重连以刷新云端 Skills 列表（启用/禁用后调用，无需重启） */
+  /** 请求热重连以刷新服务端 Skills 列表（启用/禁用后调用，无需重启） */
   onRequestReconnect?: () => Promise<void>;
   /** 保存 Ailo 连接配置后调用，用于断线后使用新配置重连 */
   onConnectionConfigSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>;
@@ -81,8 +81,33 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
   const getWebchatCtx = (): EndpointContext | null => deps.getWebchatCtx?.() ?? deps.webchatCtx ?? null;
   const wss = new WebSocketServer({ noServer: true });
 
+  const MAX_PENDING_PER_USER = 50;
+  const PENDING_TTL_MS = 5 * 60 * 1000;
+  const pendingMessages = new Map<string, { text: string; ts: number }[]>();
+
   function normalizeParticipantName(participantName?: string): string {
     return typeof participantName === "string" ? participantName.trim() : "";
+  }
+
+  function enqueuePending(routeName: string, text: string): void {
+    let queue = pendingMessages.get(routeName);
+    if (!queue) {
+      queue = [];
+      pendingMessages.set(routeName, queue);
+    }
+    queue.push({ text, ts: Date.now() });
+    if (queue.length > MAX_PENDING_PER_USER) queue.splice(0, queue.length - MAX_PENDING_PER_USER);
+  }
+
+  function flushPending(routeName: string, ws: WebSocket): void {
+    const queue = pendingMessages.get(routeName);
+    if (!queue || queue.length === 0) return;
+    const now = Date.now();
+    const valid = queue.filter((m) => now - m.ts < PENDING_TTL_MS);
+    pendingMessages.delete(routeName);
+    for (const m of valid) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "reply", text: m.text }));
+    }
   }
 
   function bindClient(participantName: string, ws: WebSocket): void {
@@ -99,6 +124,7 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     }
     group.add(ws);
     participantByClient.set(ws, participantName);
+    flushPending(participantName, ws);
   }
 
   function unbindClient(ws: WebSocket): void {
@@ -108,6 +134,12 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     const group = clientsByParticipant.get(name);
     group?.delete(ws);
     if (group && group.size === 0) clientsByParticipant.delete(name);
+  }
+
+  function handleRegister(participantName: string | undefined, ws: WebSocket): void {
+    const routeName = normalizeParticipantName(participantName);
+    if (!routeName) return;
+    bindClient(routeName, ws);
   }
 
   function handleChatMessage(text: string, participantName: string | undefined, ws: WebSocket): void {
@@ -134,7 +166,10 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     const routeName = normalizeParticipantName(participantName);
     if (!routeName) return false;
     const group = clientsByParticipant.get(routeName);
-    if (!group || group.size === 0) return false;
+    if (!group || group.size === 0) {
+      enqueuePending(routeName, text);
+      return true;
+    }
     const payload = JSON.stringify({ type: "reply", text });
     let sent = 0;
     for (const client of group) {
@@ -143,7 +178,11 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
         sent += 1;
       }
     }
-    return sent > 0;
+    if (sent === 0) {
+      enqueuePending(routeName, text);
+      return true;
+    }
+    return true;
   }
 
   const server = createServer(async (req, res) => {
@@ -182,7 +221,7 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
       if (path.match(/^\/api\/skills\/([^/]+)\/content$/) && req.method === "GET") { const n = path.split("/")[3]; return json(res, { content: await deps.skillsManager.getSkillContent(n) }); }
       if (path === "/api/skills/reconnect" && req.method === "POST") {
         try {
-          if (deps.onRequestReconnect) { await deps.onRequestReconnect(); return json(res, { ok: true, message: "已重连，云端 Skills 已更新" }); }
+          if (deps.onRequestReconnect) { await deps.onRequestReconnect(); return json(res, { ok: true, message: "已重连，Skills 已同步" }); }
           return json(res, { ok: false, error: "端点未连接，重连仅在有连接时可用" });
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : "重连失败";
@@ -200,7 +239,8 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     ws.on("message", (data: Buffer | ArrayBuffer | Buffer[]) => {
       try {
         const msg = JSON.parse(Buffer.isBuffer(data) ? data.toString() : String(data));
-        if (msg.type === "chat") handleChatMessage(msg.text, msg.participantName, ws);
+        if (msg.type === "register") handleRegister(msg.participantName, ws);
+        else if (msg.type === "chat") handleChatMessage(msg.text, msg.participantName, ws);
       } catch {
         getWebchatCtx()?.log("warn", "Failed to parse WebSocket message");
       }
@@ -788,9 +828,9 @@ code{font-size:14px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.25)
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h2>Skills</h2>
-        <div><button class="btn btn-primary btn-sm" id="skillsReconnectBtn" onclick="doSkillsReconnect()" title="启用/禁用 Skill 后点击，使云端立即生效，无需重启">重连以刷新 Skills</button> <button class="btn btn-primary btn-sm" onclick="showInstallModal()">从市场安装</button> <button class="btn btn-sm" style="background:#374151;color:#e0e0e0" onclick="showCreateModal()">创建</button></div>
+        <div><button class="btn btn-primary btn-sm" id="skillsReconnectBtn" onclick="doSkillsReconnect()" title="启用/禁用 Skill 后点击，使服务端立即生效，无需重启">重连以刷新 Skills</button> <button class="btn btn-primary btn-sm" onclick="showInstallModal()">从市场安装</button> <button class="btn btn-sm" style="background:#374151;color:#e0e0e0" onclick="showCreateModal()">创建</button></div>
       </div>
-      <p style="font-size:12px;color:#9ca3af;margin-bottom:8px">启用/禁用后点击「重连以刷新 Skills」即可让云端更新，无需重启桌面端</p>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:8px">启用/禁用后点击「重连以刷新 Skills」即可让服务端同步，无需重启桌面端</p>
       <div id="skillsList">加载中...</div>
     </div>
   </div>
@@ -896,10 +936,10 @@ async function saveConnection(){
   const displayName=document.getElementById('connDisplayName').value.trim();
   if(!ailoWsUrl||!ailoApiKey||!endpointId){msg.textContent='请填写 AILO_WS_URL、AILO_API_KEY、AILO_ENDPOINT_ID';msg.style.color='#f87171';return;}
   try{const r=await fetch(API+'/api/connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ailoWsUrl,ailoApiKey,endpointId,displayName})}).then(r=>r.json());
-  if(r.ok){msg.textContent=r.message||'已保存';msg.style.color='#4ade80';}else{msg.textContent=r.error||'保存失败';msg.style.color='#f87171';}
+  if(r.ok){msg.textContent=r.message||'已保存';msg.style.color='#4ade80';let _pc=0;const _pi=setInterval(()=>{loadAll();if(++_pc>=5)clearInterval(_pi);},2000);}else{msg.textContent=r.error||'保存失败';msg.style.color='#f87171';}
   }catch(e){msg.textContent='请求失败';msg.style.color='#f87171';}
 }
-function showTab(name){document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',t.textContent.trim()==={chat:'网页聊天',status:'状态',tools:'工具',mcp:'MCP',skills:'Skills',env:'运行环境'}[name]));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('panel-'+name).classList.add('active');if(name==='env')loadEnvCheck();if(name==='skills')loadSkills();if(name==='mcp')loadMCP();if(name==='tools')showToolsSubTab('reported');}
+function showTab(name){document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',t.textContent.trim()==={chat:'网页聊天',status:'状态',tools:'工具',mcp:'MCP',skills:'Skills',env:'运行环境'}[name]));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('panel-'+name).classList.add('active');if(name==='status'){loadAll();loadConnectionForm();}if(name==='env')loadEnvCheck();if(name==='skills')loadSkills();if(name==='mcp')loadMCP();if(name==='tools')showToolsSubTab('reported');}
 function showToolsSubTab(sub){
   document.querySelectorAll('.tools-sub-btn').forEach(b=>b.classList.toggle('active',b.dataset.toolsSub===sub));
   document.querySelectorAll('.tools-sub-panel').forEach(p=>p.classList.toggle('active',p.dataset.toolsSub===sub));

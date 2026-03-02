@@ -1,11 +1,9 @@
 /**
- * 统一文件引用（FileRef）系统 — TypeScript 端
+ * FileRef URI utilities.
  *
- * LLM 只看到 FileRef URI，端点只看到本地路径，Gateway 做翻译。
- *
- * URI 格式：
- *   ailo://blob/{blob_id}              — 中央 Blob 存储
- *   ailo://ep:{endpoint_id}/{abs_path} — 端点本地文件
+ * URI formats:
+ *   ailo://blob/{blob_id}              — Server-side Blob storage
+ *   ailo://ep:{endpoint_id}/{abs_path} — Endpoint-local file
  */
 
 const FILEREF_SCHEME = "ailo://";

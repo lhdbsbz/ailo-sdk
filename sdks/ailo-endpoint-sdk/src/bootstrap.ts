@@ -1,13 +1,17 @@
 /**
- * bootstrap.ts — Helpers for launching endpoint processes.
+ * bootstrap.ts — High-level helper for launching endpoint processes.
  *
- * Feishu, webchat, email and similar "message-channel" endpoints are:
- *  1. Launched by Ailo endpoint manager (injects AILO_WS_URL + AILO_API_KEY + AILO_ENDPOINT_ID).
- *  2. Connect to Ailo via the endpoint protocol using the injected API key.
- *  3. Optionally register tool handlers that respond to tool_request frames.
+ * Wraps EndpointClient with automatic Blob upload/download middleware,
+ * tool dispatch, skill loading, and graceful shutdown.
  *
- * Usage:
- *   runEndpoint({ handler, displayName, caps: ["message","tool_execute"] });
+ * @example
+ * ```ts
+ * runEndpoint({
+ *   handler: new MyHandler(),
+ *   displayName: "My Endpoint",
+ *   caps: ["message", "tool_execute"],
+ * });
+ * ```
  */
 
 import * as fs from "fs";
@@ -29,18 +33,18 @@ import type {
 } from "./types.js";
 
 export interface EndpointContext {
-  /** Submit a message (or perception signal) to Ailo. Media with local paths are auto-uploaded to Blob. */
+  /** Submit a message (or perception signal) to the server. Media with local paths are auto-uploaded. */
   accept(msg: AcceptMessage): Promise<void>;
   storage: EndpointStorage;
   reportHealth(status: HealthStatus, detail?: string): void;
   log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void;
   sendSignal(signal: string, data?: unknown): void;
   onSignal(signal: string, callback: (data: unknown) => void): void;
-  /** Upload a local file to Ailo's Blob store, returns FileRef URI (ailo://blob/...) */
+  /** Upload a local file to the server's Blob store. Returns the FileRef URI. */
   uploadBlob(localPath: string): Promise<string>;
   /** Resolve a FileRef URI or Blob HTTP URL to a local file path */
   resolveToLocal(pathOrUrl: string): Promise<string>;
-  /** Send a local file to Ailo via Blob upload + accept. Returns the FileRef URI. */
+  /** Send a local file to the server via Blob upload + accept. Returns the FileRef URI. */
   sendFile(localPath: string, opts?: { requiresResponse?: boolean }): Promise<string>;
   /** Register a handler for media_push events */
   onMediaPush(handler: (payload: MediaPushPayload) => void | Promise<void>): void;
@@ -59,7 +63,7 @@ export interface EndpointConfig {
   caps?: string[];
   /** The endpoint handler (feishu, webchat, etc.) */
   handler: EndpointHandler;
-  /** Tool declarations exposed to the agent at connect time */
+  /** Tool declarations reported to the server at connect time */
   tools?: ToolCapability[];
   /** Map of tool name → handler function for automatic tool_request dispatch */
   toolHandlers?: Record<string, ToolHandler>;
@@ -71,16 +75,16 @@ export interface EndpointConfig {
   ailoApiKey?: string;
   /** Override endpoint ID (default: AILO_ENDPOINT_ID env var) */
   endpointId?: string;
-  /** Optional system instructions injected into agent context */
+  /** Optional instructions describing this endpoint's environment or constraints */
   instructions?: string;
   /** Directories to scan for SKILL.md files (default: ["~/.agents/skills/"]) */
   skillDirs?: string[];
-  /** When set, report these skills to the brain instead of loading from skillDirs (enables "only report enabled skills") */
+  /** When set, report these skills to the server instead of loading from skillDirs (enables "only report enabled skills") */
   skills?: SkillMeta[];
   /**
-   * 连接失败时调用（不传则 process.exit(1)）。
-   * 推荐：退避等待后，用最新配置调用 client.reconnect(undefined, latestConfig) 再试。
-   * 每次重试都应读取最新配置，便于配置热更新。
+   * Called when the initial connection fails (defaults to process.exit(1) if not provided).
+   * Recommended: wait with backoff, then call client.reconnect(undefined, latestConfig).
+   * Re-read config on each retry to pick up hot-reloaded changes.
    */
   onConnectFailure?: (err: Error, client: EndpointClient) => void | Promise<void>;
 }

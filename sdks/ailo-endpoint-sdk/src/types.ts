@@ -2,11 +2,11 @@
 
 export type MediaData = {
   type: string;
-  /** 统一文件引用 URI (ailo://blob/... 或 ailo://ep:...) — 主标识 */
+  /** FileRef URI (ailo://blob/... or ailo://ep:...) */
   fileRef?: string;
-  /** 本地文件路径（SDK 出站前自动上传到 Blob 并替换为 fileRef） */
+  /** Local file path. Auto-uploaded to Blob storage on outbound messages. */
   path?: string;
-  /** 外部 URL（Discord CDN 等外部资源，保持原样） */
+  /** External URL (e.g. CDN link). Passed through as-is. */
   url?: string;
   mime?: string;
   name?: string;
@@ -34,15 +34,15 @@ export function mediaPart(
 export type ContextTag = {
   kind: string;
   value: string;
-  /** 参与流分组，同一组消息共享历史、一起归纳 */
+  /** When true, messages with matching tags are grouped into the same conversation stream */
   groupWith: boolean;
-  /** 回复/控制时传给工具的参数，不参与语义展示和向量嵌入 */
+  /** When true, this tag's value is forwarded to tool calls as a parameter (e.g. chat_id for reply routing) */
   passToTool?: boolean;
 };
 
 // ─── Skill metadata ──────────────────────────────────────────────────────────
 
-/** A skill loaded from a local SKILL.md file and reported to the brain at connect time. */
+/** A skill loaded from a local SKILL.md file and reported to the server at connect time. */
 export type SkillMeta = {
   name: string;
   description: string;
@@ -51,7 +51,7 @@ export type SkillMeta = {
 
 // ─── Tool capability declaration ─────────────────────────────────────────────
 
-/** Describes a tool this endpoint can execute on behalf of the agent */
+/** Describes a tool this endpoint can execute */
 export type ToolCapability = {
   name: string;
   description?: string;
@@ -127,7 +127,7 @@ export type ToolRequestPayload = {
   args: Record<string, unknown>;
 };
 
-/** Received via stream event — carries live text chunks from the agent */
+/** Received via stream event — carries live text chunks from the server */
 export type StreamPayload = {
   streamId: string;
   action: "start" | "chunk" | "end";
@@ -135,16 +135,16 @@ export type StreamPayload = {
   correlationId?: string;  // links to the accept/world_update that triggered the stream
 };
 
-/** Received via media_push event — consciousness pushes a blob to an endpoint */
+/** Received via media_push event — server pushes a file to an endpoint */
 export type MediaPushPayload = {
   file_ref: string;         // ailo://blob/... URI
   url: string;              // HTTP download URL
   mime: string;
   name?: string;
-  message?: string;         // optional message from consciousness
+  message?: string;
 };
 
-/** Received via file_fetch request — Gateway asks endpoint to upload a local file */
+/** Received via file_fetch request — server asks endpoint to upload a local file */
 export type FileFetchRequest = {
   path: string;             // local path on the endpoint
   upload_url: string;       // Blob API upload URL

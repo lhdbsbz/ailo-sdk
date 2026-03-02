@@ -205,7 +205,7 @@ tools:
       required: [action]
 
   - name: mouse_keyboard
-    description: 控制鼠标和键盘进行桌面 GUI 操作。支持像素坐标(x/y)和 UI-TARS 归一化坐标(norm_x/norm_y, 0-1000)。操作后可自动截图验证
+    description: 控制鼠标和键盘进行桌面 GUI 操作。支持像素坐标(x/y)和归一化坐标(norm_x/norm_y, 0-1000)。操作后可自动截图验证
     timeout: 10
     parameters:
       type: object
@@ -216,8 +216,8 @@ tools:
           description: "操作类型"
         x: { type: number, description: "X 像素坐标" }
         y: { type: number, description: "Y 像素坐标" }
-        norm_x: { type: number, description: "UI-TARS 归一化 X 坐标 (0-1000)" }
-        norm_y: { type: number, description: "UI-TARS 归一化 Y 坐标 (0-1000)" }
+        norm_x: { type: number, description: "归一化 X 坐标 (0-1000)" }
+        norm_y: { type: number, description: "归一化 Y 坐标 (0-1000)" }
         button: { type: string, enum: [left, right, middle], description: "鼠标按键（默认 left）" }
         start_x: { type: number, description: "拖拽起点 X 像素" }
         start_y: { type: number, description: "拖拽起点 Y 像素" }
@@ -244,14 +244,14 @@ tools:
       required: [path]
 ---
 
-桌面 Agent 运行在用户本地机器上，代理 Ailo 云端无法直接执行的本地能力。
+桌面 Agent 运行在用户本地机器上，提供 Ailo 服务端无法直接执行的本地能力。
 
 调用所有工具时，须通过 `endpointId` 参数指定目标机器（如 `desktop-agent:screenshot(endpointId="macbook-zhangsan")`）。
 
 ## 工具说明
 
 ### screenshot
-截取当前桌面屏幕。截图会以图片形式直接注入 LLM 上下文（通过 tool_response.content 的 image ContentPart）。
+截取当前桌面屏幕。截图通过 tool_response.content 以 image ContentPart 返回。
 macOS 支持 `capture_window=true` 选择窗口截图。
 
 ### get_current_time
@@ -293,11 +293,11 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 ### mouse_keyboard
 控制桌面鼠标和键盘，用于 GUI 自动化操作。支持两种坐标输入：
 - 像素坐标（`x`/`y`）：直接指定屏幕像素位置
-- 归一化坐标（`norm_x`/`norm_y`，0-1000）：由 UI-TARS 等视觉模型输出，工具内自动转换为实际像素
+- 归一化坐标（`norm_x`/`norm_y`，0-1000）：由视觉模型输出，工具内自动转换为实际像素
 
 典型 GUI 操作流程：
-1. `screenshot`：截取当前屏幕
-2. `gui_operate(intent="点击确认按钮")`：分析截图，获取精确坐标
+1. `screenshot`：截取当前屏幕，获取界面图像
+2. 分析截图确定目标元素的坐标
 3. `mouse_keyboard(action=click, norm_x=197, norm_y=525, screenshot_after=true)`：执行点击并自动截图验证
 
 `screenshot_after=true` 时操作完成后自动截图返回，可省去额外的 screenshot 调用。

@@ -1,7 +1,5 @@
 /**
- * media-util.ts — MIME 推断与媒体类型分类。
- *
- * 所有端点共用，消除各包重复的 MIME / mediaType 逻辑。
+ * MIME type inference and media classification utilities.
  */
 
 import * as path from "path";
@@ -62,13 +60,13 @@ const MIME_MAP: Record<string, string> = {
   rar: "application/vnd.rar",
 };
 
-/** 根据文件路径的扩展名推断 MIME 类型。 */
+/** Infer MIME type from a file path's extension. */
 export function inferMime(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase().replace(".", "");
   return MIME_MAP[ext] ?? "application/octet-stream";
 }
 
-/** 根据 MIME 类型分类为 ContentPart.type 枚举值。 */
+/** Classify a MIME type into a ContentPart.type value. */
 export function classifyMedia(mime: string): "image" | "audio" | "video" | "pdf" | "file" {
   const m = mime.toLowerCase();
   if (m.startsWith("image/")) return "image";

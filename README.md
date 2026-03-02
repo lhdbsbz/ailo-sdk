@@ -1,127 +1,106 @@
 # Ailo SDK
 
-Ailo 多渠道端点 SDK，通过统一的 [Endpoint Protocol](WEBSOCKET_LIMB_PROTOCOL.md) 将各类消息平台和设备接入 Ailo 意识核心。
+Multi-channel endpoint SDK for connecting messaging platforms, desktop agents, and IoT devices to an [Ailo](https://github.com/lhdbsbz/ailo) server via the unified [Endpoint Protocol](ENDPOINT_PROTOCOL.md).
 
-## 项目结构
+## Project Structure
 
 ```
 sdks/
-  ailo-endpoint-sdk/     核心 SDK — EndpointClient + runEndpoint 框架
+  ailo-endpoint-sdk/       Core SDK — EndpointClient + runEndpoint bootstrap
 
 packages/
-  ailo-feishu/           飞书通道（Lark WS 收消息 + Open API 发消息）
-  ailo-dingtalk/         钉钉通道（Stream 模式收消息 + sessionWebhook 发消息）
-  ailo-qq/               QQ 通道（Bot WS Gateway 收消息 + REST API 发消息）
-  ailo-discord/          Discord 通道（Discord.js Gateway + REST API）
-  ailo-webchat/          网页聊天通道（内置 HTTP+WS 服务器）
-  ailo-email/            邮件通道（IMAP 收信 + SMTP 发信）
-  ailo-desktop/          桌面端点（文件系统/Shell/截图/MCP 工具）
+  ailo-feishu/             Lark/Feishu channel (WS receive + Open API send)
+  ailo-dingtalk/           DingTalk channel (Stream mode + sessionWebhook)
+  ailo-qq/                 QQ channel (Bot WS Gateway + REST API)
+  ailo-discord/            Discord channel (Discord.js Gateway + REST API)
+  ailo-email/              Email channel (IMAP receive + SMTP send)
+  ailo-desktop/            Desktop agent (filesystem, shell, screenshot, browser, MCP)
 
-blueprints/              各通道的蓝图声明文件（工具定义 + 说明文档）
+blueprints/                Blueprint files for each channel (tool definitions + usage docs)
+skills/                    Built-in skill definitions (SKILL.md format)
 ```
 
-## 快速开始
+## Quick Start
 
-### 1. 安装依赖
+### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. 构建
+### 2. Build
 
 ```bash
 npm run build
 ```
 
-### 3. 启动渠道
+### 3. Launch a channel
 
-每个渠道包是独立进程，配置好环境变量后即可启动：
+Each channel runs as an independent process. After building, start any channel and open its config UI to fill in credentials — no `.env` files needed.
 
 ```bash
-# 飞书
-cd packages/ailo-feishu && cp .env.example .env  # 编辑 .env 填入凭据
-npm start
+# Feishu / Lark
+cd packages/ailo-feishu && npm start
+# Open http://127.0.0.1:19802 to configure
 
-# 钉钉
-cd packages/ailo-dingtalk && cp .env.example .env
-npm start
-
-# QQ
-cd packages/ailo-qq && cp .env.example .env
-npm start
+# DingTalk
+cd packages/ailo-dingtalk && npm start
+# Open http://127.0.0.1:19805 to configure
 
 # Discord
-cd packages/ailo-discord && cp .env.example .env
+cd packages/ailo-discord && npm start
+# Open http://127.0.0.1:19804 to configure
+
+# QQ
+cd packages/ailo-qq && npm start
+# Open http://127.0.0.1:19806 to configure
+
+# Email
+cd packages/ailo-email && npm start
+# Open http://127.0.0.1:19803 to configure
+
+# Desktop Agent
+cd packages/ailo-desktop && npx ailo-desktop init
 npm start
+# Open http://127.0.0.1:19801 to configure
 ```
 
-## 各渠道环境变量
+Each channel provides a web-based config UI where you can enter:
+- **Ailo connection**: WebSocket URL, API Key, Endpoint ID
+- **Platform credentials**: App ID, App Secret, Bot Token, etc.
 
-### 通用变量（所有渠道共用）
+Configuration is saved to `config.json` and can be hot-reloaded without restarting the process. Environment variables (`AILO_WS_URL`, `AILO_API_KEY`, `AILO_ENDPOINT_ID`, etc.) take precedence over `config.json` values when set.
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `AILO_WS_URL` | Ailo WebSocket 地址 | `ws://localhost:19800/ws` |
-| `AILO_API_KEY` | Ailo API Key | — |
-| `AILO_ENDPOINT_ID` | 端点唯一标识 | — |
+## Architecture
 
-### 飞书
-
-| 变量 | 说明 |
-|------|------|
-| `FEISHU_APP_ID` | 飞书应用 App ID |
-| `FEISHU_APP_SECRET` | 飞书应用 App Secret |
-
-获取方式：[飞书开放平台](https://open.feishu.cn/) → 创建企业自建应用 → 凭证与基础信息
-
-### 钉钉
-
-| 变量 | 说明 |
-|------|------|
-| `DINGTALK_CLIENT_ID` | 钉钉应用 Client ID (AppKey) |
-| `DINGTALK_CLIENT_SECRET` | 钉钉应用 Client Secret (AppSecret) |
-
-获取方式：[钉钉开发者后台](https://open-dev.dingtalk.com/) → 企业内部应用 → 机器人（选择 Stream 模式）
-
-### QQ
-
-| 变量 | 说明 |
-|------|------|
-| `QQ_APP_ID` | QQ 机器人 App ID |
-| `QQ_APP_SECRET` | QQ 机器人 App Secret |
-| `QQ_API_BASE` | API 地址（可选，沙箱用 `https://sandbox.api.sgroup.qq.com`） |
-
-获取方式：[QQ 开放平台](https://q.qq.com/) → 应用管理 → 机器人
-
-### Discord
-
-| 变量 | 说明 |
-|------|------|
-| `DISCORD_BOT_TOKEN` | Discord Bot Token |
-| `DISCORD_HTTP_PROXY` | HTTP 代理地址（可选，国内访问需要） |
-
-获取方式：[Discord Developer Portal](https://discord.com/developers/applications) → 创建应用 → Bot → Token
-
-## 架构说明
-
-所有渠道遵循统一架构：
+All channels follow a unified pattern:
 
 ```
-第三方平台 → XxxHandler (implements EndpointHandler)
-                ↓ ctx.accept(AcceptMessage)
-            EndpointClient → WS → Ailo Gateway → Agent Loop
-                ↑ onToolRequest(send)
-            EndpointClient ← tool_request ← Ailo
-                ↓
-            XxxHandler.sendText() → 第三方平台
+Third-party platform
+        ↓  (receive message)
+    XxxHandler
+        ↓  ctx.accept(msg)
+    EndpointClient ──WebSocket──→ Ailo Server
+        ↑  onToolRequest(send)
+    EndpointClient ←─tool_request─ Ailo Server
+        ↓
+    XxxHandler.sendText() → Third-party platform
 ```
 
-每个渠道通过 `contextTags` 携带路由信息（`chat_id`、`sender_id`、`conv_type` 等），Ailo 根据 `chat_id` 的 `groupWith` 标记自动管理会话分组。回复通过蓝图工具 `send` 触发，Ailo 调用 `tool_request` 事件，渠道 handler 接收后调用各平台发送 API。
+Each channel:
+1. Receives messages from its platform (Lark webhook, Discord gateway, IMAP poll, etc.)
+2. Forwards them to Ailo via `ctx.accept()` with `contextTags` for routing
+3. Listens for `tool_request` events to send replies back through the platform's API
 
-## 开发新渠道
+## Developing a New Channel
 
-1. 在 `packages/` 下创建新目录
-2. 实现 `EndpointHandler` 接口（`start(ctx)` + `stop()`）
-3. 在 `index.ts` 中调用 `runEndpoint()`
-4. 在 `blueprints/` 下创建对应蓝图文件
+1. Create a new directory under `packages/`
+2. Implement the `EndpointHandler` interface (`start(ctx)` + `stop()`)
+3. Call `runEndpoint()` in your `index.ts`
+4. Create a blueprint file under `blueprints/`
+
+See the [Endpoint Protocol](ENDPOINT_PROTOCOL.md) for the full protocol specification.
+
+## License
+
+MIT

@@ -1,0 +1,23 @@
+{
+  "name": "@lmcl/ailo-clawwork",
+  "version": "1.0.0",
+  "description": "Ailo endpoint for ClawWork economic survival benchmark — accept tasks, submit work, earn income",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ailo-clawwork": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@lmcl/ailo-endpoint-sdk": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}
