@@ -28,7 +28,10 @@ if (subcommand === "init") {
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
 import { inferMime, classifyMedia, mediaPart } from "@lmcl/ailo-endpoint-sdk";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import { takeScreenshot } from "./screenshot.js";
 import { execTool } from "./exec_tool.js";
 import { fsTool } from "./fs_tools.js";
@@ -50,11 +53,12 @@ import {
   type AiloConnectionConfig,
 } from "./connection_util.js";
 
+const BLUEPRINTS_DIR = join(__dirname, "..", "..", "..", "blueprints");
 const BLUEPRINT_URL =
   process.env.BLUEPRINT_DESKTOP_URL ??
-  join("..", "..", "blueprints", "desktop-agent.blueprint.md");
-const BLUEPRINT_WEBCHAT = join("..", "..", "blueprints", "webchat.blueprint.md");
-const BLUEPRINT_EMAIL = join("..", "..", "blueprints", "email.blueprint.md");
+  join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md");
+const BLUEPRINT_WEBCHAT = join(BLUEPRINTS_DIR, "webchat.blueprint.md");
+const BLUEPRINT_EMAIL = join(BLUEPRINTS_DIR, "email.blueprint.md");
 
 const EMAIL_ENV_MAPPING = [
   { envVar: "IMAP_HOST", configPath: "email.imapHost" },
@@ -306,7 +310,7 @@ async function main(): Promise<void> {
     port,
     configPath,
     blueprintUrl: BLUEPRINT_URL,
-    blueprintLocalPath: join("..", "..", "blueprints", "desktop-agent.blueprint.md"),
+    blueprintLocalPath: join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md"),
     onWebchatReady: (api) => { webchatApi = api; },
     onRequestReconnect: async () => {
       if (!endpointCtx) return;

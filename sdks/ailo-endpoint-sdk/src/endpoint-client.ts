@@ -33,8 +33,13 @@ function resolveBlueprintPath(blueprint: string): string {
   if (blueprint.startsWith("http://") || blueprint.startsWith("https://") || blueprint.startsWith("file://")) {
     return blueprint;
   }
-  const cwd = process.cwd();
-  return path.resolve(cwd, blueprint);
+  if (!path.isAbsolute(blueprint)) {
+    console.warn(
+      `[endpoint] Blueprint path "${blueprint}" is relative — this may break if the working directory changes. ` +
+      `Use an absolute path (e.g. via import.meta.url) instead.`,
+    );
+  }
+  return path.resolve(blueprint);
 }
 const REQUEST_TIMEOUT_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -587,6 +592,10 @@ export class EndpointClient implements EndpointStorage {
   private async handleFileFetch(reqId: string, payload: FileFetchRequest): Promise<void> {
     try {
       const localPath = payload.path;
+      if (!path.isAbsolute(localPath)) {
+        await this.toolResponse({ id: reqId, success: false, error: `path must be absolute, got: "${localPath}"` });
+        return;
+      }
       if (!fs.existsSync(localPath)) {
         await this.toolResponse({ id: reqId, success: false, error: `file not found: ${localPath}` });
         return;
@@ -617,6 +626,10 @@ export class EndpointClient implements EndpointStorage {
   private async handleDirList(reqId: string, payload: DirListRequest): Promise<void> {
     try {
       const dirPath = payload.path;
+      if (!path.isAbsolute(dirPath)) {
+        await this.toolResponse({ id: reqId, success: false, error: `path must be absolute, got: "${dirPath}"` });
+        return;
+      }
       if (!fs.existsSync(dirPath)) {
         await this.toolResponse({ id: reqId, success: false, error: `directory not found: ${dirPath}` });
         return;
@@ -656,10 +669,18 @@ export class EndpointClient implements EndpointStorage {
   private async handleFilePush(reqId: string, payload: FilePushRequest): Promise<void> {
     try {
       const targetPath = payload.target_path;
+      if (!path.isAbsolute(targetPath)) {
+        await this.toolResponse({ id: reqId, success: false, error: `target_path must be absolute, got: "${targetPath}"` });
+        return;
+      }
       const dir = path.dirname(targetPath);
       fs.mkdirSync(dir, { recursive: true });
 
       if (payload.local_source) {
+        if (!path.isAbsolute(payload.local_source)) {
+          await this.toolResponse({ id: reqId, success: false, error: `local_source must be absolute, got: "${payload.local_source}"` });
+          return;
+        }
         fs.copyFileSync(payload.local_source, targetPath);
         const stat = fs.statSync(targetPath);
         await this.toolResponse({ id: reqId, success: true, result: { size: stat.size } });
@@ -687,6 +708,10 @@ export class EndpointClient implements EndpointStorage {
 
   private async handleFsProbe(reqId: string, payload: FsProbeRequest): Promise<void> {
     try {
+      if (!path.isAbsolute(payload.path)) {
+        await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } });
+        return;
+      }
       if (fs.existsSync(payload.path)) {
         const content = fs.readFileSync(payload.path, "utf-8");
         await this.toolResponse({ id: reqId, success: true, result: { found: true, content } });

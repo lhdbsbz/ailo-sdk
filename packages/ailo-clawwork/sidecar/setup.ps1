@@ -71,21 +71,27 @@ Write-Host "[OK] Found $metaCount evaluation meta-prompts" -ForegroundColor Gree
 # ── 4. LibreOffice (PPTX/DOCX evaluation needs it) ──
 $loPath = "C:\Program Files\LibreOffice\program"
 $loInstalled = Test-Path "$loPath\soffice.exe"
-if (-not $loInstalled) {
+if ($loInstalled) {
+    Write-Host "[OK] LibreOffice already installed at: $loPath" -ForegroundColor Green
+} else {
     Write-Host "[..] Installing LibreOffice via winget..." -ForegroundColor Yellow
-    winget install TheDocumentFoundation.LibreOffice --accept-package-agreements --accept-source-agreements
+    $ErrorActionPreference = "Continue"
+    winget install TheDocumentFoundation.LibreOffice --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+    $ErrorActionPreference = "Stop"
     $loInstalled = Test-Path "$loPath\soffice.exe"
+    if ($loInstalled) {
+        Write-Host "[OK] LibreOffice installed" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] LibreOffice not found after install. Please install manually: https://www.libreoffice.org/download" -ForegroundColor Yellow
+    }
 }
 if ($loInstalled) {
-    Write-Host "[OK] LibreOffice installed at: $loPath" -ForegroundColor Green
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath -notlike "*$loPath*") {
         [Environment]::SetEnvironmentVariable("Path", "$userPath;$loPath", "User")
         $env:Path = "$env:Path;$loPath"
         Write-Host "     Added LibreOffice to PATH" -ForegroundColor Green
     }
-} else {
-    Write-Host "[WARN] LibreOffice not found. Please install manually: https://www.libreoffice.org/download" -ForegroundColor Yellow
 }
 
 # ── 5. Poppler (PDF to image conversion) ──

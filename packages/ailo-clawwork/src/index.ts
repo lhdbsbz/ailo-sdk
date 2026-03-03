@@ -11,7 +11,10 @@
 
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import { startConfigServer } from "./config_server.js";
 import {
   loadConnectionConfig,
@@ -21,7 +24,7 @@ import {
 } from "./connection_util.js";
 
 const SIDECAR_URL = process.env.CLAWWORK_SIDECAR_URL ?? "http://localhost:8020";
-const BLUEPRINT = join("blueprints", "clawwork.blueprint.md");
+const BLUEPRINT = join(__dirname, "..", "blueprints", "clawwork.blueprint.md");
 const CONFIG_PORT = Number(process.env.CONFIG_PORT ?? 19802) || 19802;
 const configPath = join(process.cwd(), "config.json");
 
@@ -84,6 +87,7 @@ function formatStatus(s: Record<string, unknown>): string {
     `- **生存状态**: ${s.survival_status}`,
     `- **累计收入**: $${Number(s.total_work_income).toFixed(2)}`,
     `- **累计成本**: $${Number(s.total_token_cost).toFixed(4)}`,
+    `- **任务进度**: ${s.completed_tasks ?? 0} / ${s.total_tasks ?? "?"} 已完成（剩余 ${s.remaining_tasks ?? "?"}）`,
     `- **当前任务**: ${s.current_task ?? "无"}`,
   ].join("\n");
 }

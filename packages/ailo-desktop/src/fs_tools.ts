@@ -4,6 +4,14 @@ import { glob } from "glob";
 
 type Args = Record<string, unknown>;
 
+function requireAbsPath(p: string, param: string): string {
+  if (!p) throw new Error(`${param} 不能为空`);
+  if (!path.isAbsolute(p)) {
+    throw new Error(`${param} 必须是绝对路径，收到相对路径: "${p}"`);
+  }
+  return p;
+}
+
 export async function fsTool(name: string, args: Args): Promise<string> {
   switch (name) {
     case "read_file":
@@ -32,7 +40,7 @@ export async function fsTool(name: string, args: Args): Promise<string> {
 }
 
 function readFile(args: Args): string {
-  const filePath = args.path as string;
+  const filePath = requireAbsPath(args.path as string, "path");
   if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
 
   const content = fs.readFileSync(filePath, "utf-8");
@@ -45,7 +53,7 @@ function readFile(args: Args): string {
 }
 
 function writeFile(args: Args): string {
-  const filePath = args.path as string;
+  const filePath = requireAbsPath(args.path as string, "path");
   const content = args.content as string;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf-8");
@@ -53,7 +61,7 @@ function writeFile(args: Args): string {
 }
 
 function editFile(args: Args): string {
-  const filePath = args.path as string;
+  const filePath = requireAbsPath(args.path as string, "path");
   const oldStr = args.old_string as string;
   const newStr = args.new_string as string;
   const replaceAll = (args.replace_all as boolean) ?? false;
@@ -77,7 +85,7 @@ function editFile(args: Args): string {
 }
 
 function listDirectory(args: Args): string {
-  const dirPath = args.path as string;
+  const dirPath = requireAbsPath(args.path as string, "path");
   if (!fs.existsSync(dirPath)) throw new Error(`目录不存在: ${dirPath}`);
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   const lines = entries.map((e) => {
@@ -101,7 +109,7 @@ function formatSize(bytes: number): string {
 
 async function findFiles(args: Args): Promise<string> {
   const pattern = args.pattern as string;
-  const directory = (args.directory as string) || ".";
+  const directory = requireAbsPath((args.directory as string) || process.cwd(), "directory");
   const maxResults = (args.max_results as number) || 200;
 
   const matches = await glob(pattern, {
@@ -122,7 +130,7 @@ async function findFiles(args: Args): Promise<string> {
 
 function searchContent(args: Args): string {
   const query = args.query as string;
-  const directory = (args.directory as string) || ".";
+  const directory = requireAbsPath((args.directory as string) || process.cwd(), "directory");
   const useRegex = (args.regex as boolean) ?? false;
   const ignoreCase = (args.ignore_case as boolean) ?? false;
   const contextLines = (args.context_lines as number) ?? 0;
@@ -173,7 +181,7 @@ function searchDir(dir: string, pattern: RegExp, ctx: number, results: string[],
 }
 
 function deleteFile(args: Args): string {
-  const filePath = args.path as string;
+  const filePath = requireAbsPath(args.path as string, "path");
   const recursive = (args.recursive as boolean) ?? false;
   if (!fs.existsSync(filePath)) throw new Error(`路径不存在: ${filePath}`);
   fs.rmSync(filePath, { recursive, force: true });
@@ -181,8 +189,8 @@ function deleteFile(args: Args): string {
 }
 
 function moveFile(args: Args): string {
-  const src = args.source as string;
-  const dst = args.destination as string;
+  const src = requireAbsPath(args.source as string, "source");
+  const dst = requireAbsPath(args.destination as string, "destination");
   if (!fs.existsSync(src)) throw new Error(`源路径不存在: ${src}`);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.renameSync(src, dst);
@@ -190,8 +198,8 @@ function moveFile(args: Args): string {
 }
 
 function copyFile(args: Args): string {
-  const src = args.source as string;
-  const dst = args.destination as string;
+  const src = requireAbsPath(args.source as string, "source");
+  const dst = requireAbsPath(args.destination as string, "destination");
   if (!fs.existsSync(src)) throw new Error(`源路径不存在: ${src}`);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   const stat = fs.statSync(src);
@@ -204,7 +212,7 @@ function copyFile(args: Args): string {
 }
 
 function appendFile(args: Args): string {
-  const filePath = args.path as string;
+  const filePath = requireAbsPath(args.path as string, "path");
   const content = args.content as string;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, content, "utf-8");
