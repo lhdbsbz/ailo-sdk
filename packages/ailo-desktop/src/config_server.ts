@@ -30,7 +30,7 @@ export interface EnvCheckResult {
 interface ConfigServerDeps {
   mcpManager: LocalMCPManager;
   skillsManager: SkillsManager;
-  getConnectionStatus: () => { connected: boolean; endpointId: string; displayName: string };
+  getConnectionStatus: () => { connected: boolean; endpointId: string };
   port: number;
   /** config.json path for Ailo connection config */
   configPath?: string;
@@ -47,7 +47,11 @@ interface ConfigServerDeps {
   /** 请求热重连以刷新服务端 Skills 列表（启用/禁用后调用，无需重启） */
   onRequestReconnect?: () => Promise<void>;
   /** 保存 Ailo 连接配置后调用，用于断线后使用新配置重连 */
-  onConnectionConfigSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>;
+  onConnectionConfigSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string }) => Promise<void>;
+  /** 邮件配置保存后回调，重建邮件通道 */
+  onEmailConfigSaved?: () => Promise<void>;
+  /** 获取邮件通道状态 */
+  getEmailStatus?: () => { configured: boolean; running: boolean };
 }
 
 function getChatHtmlPath(): string {
@@ -207,6 +211,11 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
       if (deps.configPath) {
         if (path === "/api/connection" && req.method === "GET") return json(res, getConnectionConfig(deps.configPath));
         if (path === "/api/connection" && req.method === "POST") return json(res, await saveConnectionConfig(deps.configPath, await body(req), deps.onConnectionConfigSaved));
+      }
+      // 邮件配置
+      if (deps.configPath) {
+        if (path === "/api/email/config" && req.method === "GET") return json(res, getEmailConfig(deps.configPath, deps.getEmailStatus));
+        if (path === "/api/email/config" && req.method === "POST") return json(res, await saveEmailConfig(deps.configPath, await body(req), deps.onEmailConfigSaved));
       }
       // MCP
       if (path === "/api/mcp" && req.method === "GET") return json(res, getMCPList(deps.mcpManager));
@@ -434,53 +443,6 @@ function checkLibreOffice(): EnvRuntimeItem {
   };
 }
 
-/** 检测 himalaya CLI（邮件 Skill 可选依赖） */
-function checkHimalaya(): EnvRuntimeItem {
-  const r = spawnSync("himalaya", ["--version"], { encoding: "utf-8", timeout: 3000 });
-  if (r.status === 0 || (r.stdout || r.stderr || "").trim()) {
-    const out = (r.stdout || r.stderr || "").trim();
-    return {
-      id: "himalaya",
-      name: "himalaya",
-      description: "邮件 Skill（IMAP/SMTP 收发、附件）",
-      ok: true,
-      detail: out.split(/\n/)[0]?.trim() || "已安装",
-      canAutoInstall: false,
-    };
-  }
-  const platform = process.platform;
-  let hint: string;
-  if (platform === "win32") {
-    hint =
-      "himalaya 是命令行邮件客户端，用于邮件 Skill（IMAP/SMTP 收发、附件）。\n\n" +
-      "1. 若已安装 Scoop，执行：scoop install himalaya\n" +
-      "2. 未安装 Scoop 可先执行：Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser；然后 irm get.scoop.sh | iex\n" +
-      "3. 安装后在终端执行 himalaya --version 验证\n" +
-      "4. 需在 ~/.config/himalaya/config.toml 中配置邮箱账户。详见 https://github.com/soywod/himalaya";
-  } else if (platform === "darwin") {
-    hint =
-      "himalaya 是命令行邮件客户端，用于邮件 Skill（IMAP/SMTP 收发、附件）。\n\n" +
-      "1. 执行：brew install himalaya\n" +
-      "2. 安装后在终端执行 himalaya --version 验证\n" +
-      "3. 需在 ~/.config/himalaya/config.toml 中配置邮箱账户。详见 https://github.com/soywod/himalaya";
-  } else {
-    hint =
-      "himalaya 是命令行邮件客户端，用于邮件 Skill（IMAP/SMTP 收发、附件）。\n\n" +
-      "1. 一键安装：curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | bash\n" +
-      "2. 或从 GitHub Releases 下载对应架构的二进制：https://github.com/soywod/himalaya/releases\n" +
-      "3. 安装后在终端执行 himalaya --version 验证\n" +
-      "4. 需在 ~/.config/himalaya/config.toml 中配置邮箱账户。详见 https://github.com/soywod/himalaya";
-  }
-  return {
-    id: "himalaya",
-    name: "himalaya",
-    description: "邮件 Skill（IMAP/SMTP 收发、附件）",
-    ok: false,
-    hint,
-    canAutoInstall: false,
-  };
-}
-
 async function getEnvCheck(): Promise<EnvCheckResult> {
   const playwright = await checkPlaywright();
   const runtimes: EnvRuntimeItem[] = [
@@ -488,7 +450,6 @@ async function getEnvCheck(): Promise<EnvCheckResult> {
     checkPython(),
     playwright,
     checkLibreOffice(),
-    checkHimalaya(),
   ];
   return { runtimes };
 }
@@ -601,7 +562,6 @@ function getConnectionConfig(configPath: string): {
   ailoWsUrl?: string;
   ailoApiKey?: string;
   endpointId?: string;
-  displayName?: string;
 } {
   const cfg = readConfig(configPath);
   const { merged } = mergeWithEnv(cfg, AILO_ENV_MAPPING);
@@ -614,33 +574,74 @@ function getConnectionConfig(configPath: string): {
     ailoWsUrl: url || undefined,
     ailoApiKey: key || undefined,
     endpointId: id || undefined,
-    displayName: (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) || undefined,
   };
 }
 
 async function saveConnectionConfig(
   configPath: string,
   bodyStr: string,
-  onSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>,
+  onSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string }) => Promise<void>,
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   try {
     const bodyTrimmed = (bodyStr ?? "").trim();
     if (!bodyTrimmed) return { ok: false, error: "请求体为空" };
     const existing = readConfig(configPath) as Record<string, unknown>;
-    const b = JSON.parse(bodyTrimmed) as { ailoWsUrl?: string; ailoApiKey?: string; endpointId?: string; displayName?: string };
+    const b = JSON.parse(bodyTrimmed) as { ailoWsUrl?: string; ailoApiKey?: string; endpointId?: string };
     if (b.ailoWsUrl !== undefined) setNestedValue(existing, "ailo.wsUrl", b.ailoWsUrl);
     if (b.ailoApiKey !== undefined) setNestedValue(existing, "ailo.apiKey", b.ailoApiKey);
     if (b.endpointId !== undefined) setNestedValue(existing, "ailo.endpointId", b.endpointId);
-    if (b.displayName !== undefined) setNestedValue(existing, "ailo.displayName", b.displayName);
     writeConfig(configPath, existing);
     const { merged } = mergeWithEnv(existing, AILO_ENV_MAPPING);
     const ailoWsUrl = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
     const ailoApiKey = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
     const endpointId = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
-    const displayName = (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) ?? undefined;
     if (onSaved && ailoWsUrl && ailoApiKey && endpointId) {
-      await onSaved({ ailoWsUrl, ailoApiKey, endpointId, displayName });
+      await onSaved({ ailoWsUrl, ailoApiKey, endpointId });
       return { ok: true, message: "已保存，正在使用新配置重连…" };
+    }
+    return { ok: true, message: "已保存。" };
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function getEmailConfig(
+  configPath: string,
+  getStatus?: () => { configured: boolean; running: boolean },
+): Record<string, unknown> {
+  const cfg = readConfig(configPath) as Record<string, unknown>;
+  const email = (cfg.email ?? {}) as Record<string, unknown>;
+  const status = getStatus?.() ?? { configured: false, running: false };
+  return {
+    imapHost: email.imapHost ?? "",
+    imapUser: email.imapUser ?? "",
+    imapPort: email.imapPort ?? 993,
+    smtpHost: email.smtpHost ?? "",
+    smtpPort: email.smtpPort ?? 465,
+    smtpUser: email.smtpUser ?? "",
+    hasPassword: !!(email.imapPassword),
+    ...status,
+  };
+}
+
+async function saveEmailConfig(
+  configPath: string,
+  bodyStr: string,
+  onSaved?: () => Promise<void>,
+): Promise<{ ok: boolean; message?: string; error?: string }> {
+  try {
+    const bodyTrimmed = (bodyStr ?? "").trim();
+    if (!bodyTrimmed) return { ok: false, error: "请求体为空" };
+    const existing = readConfig(configPath) as Record<string, unknown>;
+    const b = JSON.parse(bodyTrimmed) as Record<string, unknown>;
+    const emailFields = ["imapHost", "imapUser", "imapPassword", "imapPort", "smtpHost", "smtpPort", "smtpUser", "smtpPassword"];
+    for (const field of emailFields) {
+      if (b[field] !== undefined) setNestedValue(existing, `email.${field}`, b[field]);
+    }
+    writeConfig(configPath, existing);
+    if (onSaved) {
+      await onSaved();
+      return { ok: true, message: "已保存，邮件通道正在重启…" };
     }
     return { ok: true, message: "已保存。" };
   } catch (e: unknown) {
@@ -760,6 +761,7 @@ code{font-size:14px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.25)
     <div class="tab" onclick="showTab('tools')">工具</div>
     <div class="tab" onclick="showTab('mcp')">MCP</div>
     <div class="tab" onclick="showTab('skills')">Skills</div>
+    <div class="tab" onclick="showTab('email')">邮件</div>
     <div class="tab" onclick="showTab('env')">运行环境</div>
   </div>
 
@@ -779,7 +781,6 @@ code{font-size:14px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.25)
       <div class="form-group"><label>AILO_WS_URL</label><input id="connWsUrl" placeholder="ws://127.0.0.1:19800/ws"></div>
       <div class="form-group"><label>AILO_API_KEY</label><input id="connApiKey" type="text" placeholder="ailo_ep_xxx" autocomplete="off"></div>
       <div class="form-group"><label>AILO_ENDPOINT_ID</label><input id="connEndpointId" placeholder="desktop-01"></div>
-      <div class="form-group"><label>DISPLAY_NAME（可选）</label><input id="connDisplayName" placeholder="我的桌面"></div>
       <button class="btn btn-primary" onclick="saveConnection()">保存</button>
       <span id="connectionSaveMsg" style="margin-left:10px;font-size:14px;color:#9ca3af"></span>
     </div>
@@ -832,6 +833,24 @@ code{font-size:14px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.25)
       </div>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:8px">启用/禁用后点击「重连以刷新 Skills」即可让服务端同步，无需重启桌面端</p>
       <div id="skillsList">加载中...</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-email">
+    <div class="card">
+      <h2>邮件通道配置</h2>
+      <p style="font-size:14px;color:#9ca3af;margin-bottom:6px">配置 IMAP/SMTP 信息后，桌面端点将自动通过 IMAP IDLE 接收邮件并推送至 Ailo，同时支持发送/回复/转发等操作。</p>
+      <div id="emailStatusBar" style="margin-bottom:14px"></div>
+      <div class="form-group"><label>IMAP 主机</label><input id="emailImapHost" placeholder="imap.example.com"></div>
+      <div class="form-group"><label>IMAP 用户名</label><input id="emailImapUser" placeholder="user@example.com"></div>
+      <div class="form-group"><label>IMAP 密码</label><input id="emailImapPassword" type="password" placeholder="密码或授权码" autocomplete="off"></div>
+      <div class="form-group"><label>IMAP 端口</label><input id="emailImapPort" type="number" placeholder="993"></div>
+      <div class="form-group"><label>SMTP 主机（可选，不填则从 IMAP 推断）</label><input id="emailSmtpHost" placeholder="smtp.example.com"></div>
+      <div class="form-group"><label>SMTP 端口（可选，默认 465）</label><input id="emailSmtpPort" type="number" placeholder="465"></div>
+      <div class="form-group"><label>SMTP 用户名（可选，不填则用 IMAP 用户名）</label><input id="emailSmtpUser" placeholder=""></div>
+      <div class="form-group"><label>SMTP 密码（可选，不填则用 IMAP 密码）</label><input id="emailSmtpPassword" type="password" placeholder="" autocomplete="off"></div>
+      <button class="btn btn-primary" onclick="saveEmailConfig()">保存</button>
+      <span id="emailSaveMsg" style="margin-left:10px;font-size:14px;color:#9ca3af"></span>
     </div>
   </div>
 
@@ -925,7 +944,6 @@ async function loadConnectionForm(){
   document.getElementById('connWsUrl').value=c.ailoWsUrl||'';
   document.getElementById('connApiKey').value=c.ailoApiKey||'';
   document.getElementById('connEndpointId').value=c.endpointId||'';
-  document.getElementById('connDisplayName').value=c.displayName||'';
   }catch(e){}
 }
 async function saveConnection(){
@@ -933,13 +951,12 @@ async function saveConnection(){
   const ailoWsUrl=document.getElementById('connWsUrl').value.trim();
   const ailoApiKey=document.getElementById('connApiKey').value.trim();
   const endpointId=document.getElementById('connEndpointId').value.trim();
-  const displayName=document.getElementById('connDisplayName').value.trim();
   if(!ailoWsUrl||!ailoApiKey||!endpointId){msg.textContent='请填写 AILO_WS_URL、AILO_API_KEY、AILO_ENDPOINT_ID';msg.style.color='#f87171';return;}
-  try{const r=await fetch(API+'/api/connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ailoWsUrl,ailoApiKey,endpointId,displayName})}).then(r=>r.json());
+  try{const r=await fetch(API+'/api/connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ailoWsUrl,ailoApiKey,endpointId})}).then(r=>r.json());
   if(r.ok){msg.textContent=r.message||'已保存';msg.style.color='#4ade80';let _pc=0;const _pi=setInterval(()=>{loadAll();if(++_pc>=5)clearInterval(_pi);},2000);}else{msg.textContent=r.error||'保存失败';msg.style.color='#f87171';}
   }catch(e){msg.textContent='请求失败';msg.style.color='#f87171';}
 }
-function showTab(name){document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',t.textContent.trim()==={chat:'网页聊天',status:'状态',tools:'工具',mcp:'MCP',skills:'Skills',env:'运行环境'}[name]));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('panel-'+name).classList.add('active');if(name==='status'){loadAll();loadConnectionForm();}if(name==='env')loadEnvCheck();if(name==='skills')loadSkills();if(name==='mcp')loadMCP();if(name==='tools')showToolsSubTab('reported');}
+function showTab(name){document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',t.textContent.trim()==={chat:'网页聊天',status:'状态',tools:'工具',mcp:'MCP',skills:'Skills',email:'邮件',env:'运行环境'}[name]));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('panel-'+name).classList.add('active');if(name==='status'){loadAll();loadConnectionForm();}if(name==='env')loadEnvCheck();if(name==='skills')loadSkills();if(name==='mcp')loadMCP();if(name==='tools')showToolsSubTab('reported');if(name==='email')loadEmailConfig();}
 function showToolsSubTab(sub){
   document.querySelectorAll('.tools-sub-btn').forEach(b=>b.classList.toggle('active',b.dataset.toolsSub===sub));
   document.querySelectorAll('.tools-sub-panel').forEach(p=>p.classList.toggle('active',p.dataset.toolsSub===sub));
@@ -1036,7 +1053,7 @@ async function loadAll(){
   try{const s=await fetch(API+'/api/status').then(r=>r.json());
   document.getElementById('dot').className='dot '+(s.connected?'on':'off');
   document.getElementById('statusText').textContent=s.connected?'已连接':'未连接';
-  document.getElementById('statusInfo').innerHTML='<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+(s.endpointId||'-')+'</span></div><div class="info-row"><span class="info-label">显示名</span><span class="info-value">'+(s.displayName||'-')+'</span></div><div class="info-row"><span class="info-label">状态</span><span class="info-value">'+(s.connected?'<span class="badge on">已连接</span>':'<span class="badge off">未连接</span>')+'</span></div>';
+  document.getElementById('statusInfo').innerHTML='<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+(s.endpointId||'-')+'</span></div><div class="info-row"><span class="info-label">状态</span><span class="info-value">'+(s.connected?'<span class="badge on">已连接</span>':'<span class="badge off">未连接</span>')+'</span></div>';
   loadEnvCheck();
   }catch(e){document.getElementById('statusInfo').textContent='加载失败';}
 }
@@ -1138,6 +1155,44 @@ async function loadBlueprint(){
     urlEl.textContent=r.url||'未配置蓝图';
     contentEl.textContent=(r.content!=null&&r.content!=='')?r.content:'无内容或加载失败';
   }catch(e){contentEl.textContent='加载失败';}
+}
+async function loadEmailConfig(){
+  try{const c=await fetch(API+'/api/email/config').then(r=>r.json());
+  document.getElementById('emailImapHost').value=c.imapHost||'';
+  document.getElementById('emailImapUser').value=c.imapUser||'';
+  document.getElementById('emailImapPort').value=c.imapPort||993;
+  document.getElementById('emailSmtpHost').value=c.smtpHost||'';
+  document.getElementById('emailSmtpPort').value=c.smtpPort||465;
+  document.getElementById('emailSmtpUser').value=c.smtpUser||'';
+  document.getElementById('emailImapPassword').value='';
+  document.getElementById('emailSmtpPassword').value='';
+  var bar=document.getElementById('emailStatusBar');
+  if(bar){
+    if(c.running)bar.innerHTML='<span class="badge on">邮件通道运行中</span>';
+    else if(c.configured)bar.innerHTML='<span class="badge" style="background:rgba(234,179,8,.18);color:#fbbf24">已配置但未运行</span>';
+    else bar.innerHTML='<span class="badge off">未配置</span>';
+  }
+  }catch(e){}
+}
+async function saveEmailConfig(){
+  const msg=document.getElementById('emailSaveMsg');
+  const data={
+    imapHost:document.getElementById('emailImapHost').value.trim(),
+    imapUser:document.getElementById('emailImapUser').value.trim(),
+    imapPort:parseInt(document.getElementById('emailImapPort').value)||993,
+    smtpHost:document.getElementById('emailSmtpHost').value.trim()||undefined,
+    smtpPort:parseInt(document.getElementById('emailSmtpPort').value)||undefined,
+    smtpUser:document.getElementById('emailSmtpUser').value.trim()||undefined,
+  };
+  var pw=document.getElementById('emailImapPassword').value;
+  if(pw)data.imapPassword=pw;
+  var spw=document.getElementById('emailSmtpPassword').value;
+  if(spw)data.smtpPassword=spw;
+  if(!data.imapHost||!data.imapUser){msg.textContent='请至少填写 IMAP 主机和用户名';msg.style.color='#f87171';return;}
+  if(!pw&&!data.imapHost){msg.textContent='首次配置需填写 IMAP 密码';msg.style.color='#f87171';return;}
+  try{const r=await fetch(API+'/api/email/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json());
+  if(r.ok){msg.textContent=r.message||'已保存';msg.style.color='#4ade80';setTimeout(loadEmailConfig,2000);}else{msg.textContent=r.error||'保存失败';msg.style.color='#f87171';}
+  }catch(e){msg.textContent='请求失败';msg.style.color='#f87171';}
 }
 loadConnectionForm();loadAll();setInterval(loadAll,15000);
 </script>

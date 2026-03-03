@@ -27,6 +27,7 @@ if (subcommand === "init") {
 }
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
+import { inferMime, classifyMedia, mediaPart } from "@lmcl/ailo-endpoint-sdk";
 import { join } from "path";
 import { takeScreenshot } from "./screenshot.js";
 import { execTool } from "./exec_tool.js";
@@ -39,22 +40,38 @@ import { startConfigServer } from "./config_server.js";
 import { getCurrentTime } from "./time_tool.js";
 import { mouseKeyboard } from "./mouse_keyboard.js";
 import { SkillsManager } from "./skills_manager.js";
+import { EmailHandler, type EmailConfig } from "./email_handler.js";
 import {
   loadConnectionConfig,
   hasValidConfig,
   backoffDelayMs,
+  readConfig,
+  mergeWithEnv,
   type AiloConnectionConfig,
 } from "./connection_util.js";
 
 const BLUEPRINT_URL =
   process.env.BLUEPRINT_DESKTOP_URL ??
   join("..", "..", "blueprints", "desktop-agent.blueprint.md");
-const BLUEPRINT_WEBCHAT = join("..", "..", "blueprints", "webchat-channel.blueprint.md");
+const BLUEPRINT_WEBCHAT = join("..", "..", "blueprints", "webchat.blueprint.md");
+const BLUEPRINT_EMAIL = join("..", "..", "blueprints", "email.blueprint.md");
+
+const EMAIL_ENV_MAPPING = [
+  { envVar: "IMAP_HOST", configPath: "email.imapHost" },
+  { envVar: "IMAP_USER", configPath: "email.imapUser" },
+  { envVar: "IMAP_PASSWORD", configPath: "email.imapPassword" },
+  { envVar: "IMAP_PORT", configPath: "email.imapPort" },
+  { envVar: "SMTP_HOST", configPath: "email.smtpHost" },
+  { envVar: "SMTP_PORT", configPath: "email.smtpPort" },
+  { envVar: "SMTP_USER", configPath: "email.smtpUser" },
+  { envVar: "SMTP_PASSWORD", configPath: "email.smtpPassword" },
+] as const;
 
 const mcpManager = new LocalMCPManager();
 const skillsManager = new SkillsManager();
 let endpointCtx: EndpointContext | null = null;
 let webchatApi: { recordAiloReply: (text: string, participantName: string) => boolean } | null = null;
+let emailHandler: EmailHandler | null = null;
 
 async function initSubsystems(): Promise<void> {
   try {
@@ -71,10 +88,32 @@ async function initSubsystems(): Promise<void> {
   }
 }
 
+function loadEmailConfig(configPath: string): EmailConfig | null {
+  const raw = readConfig(configPath);
+  const { merged } = mergeWithEnv(raw, EMAIL_ENV_MAPPING as any);
+  const e = (merged as Record<string, unknown>).email as Record<string, unknown> | undefined;
+  if (!e?.imapHost || !e?.imapUser || !e?.imapPassword) return null;
+  return {
+    imapHost: e.imapHost as string,
+    imapPort: Number(e.imapPort) || 993,
+    imapUser: e.imapUser as string,
+    imapPassword: e.imapPassword as string,
+    smtpHost: (e.smtpHost as string) || undefined,
+    smtpPort: e.smtpPort ? Number(e.smtpPort) : undefined,
+    smtpUser: (e.smtpUser as string) || undefined,
+    smtpPassword: (e.smtpPassword as string) || undefined,
+  };
+}
+
 const FS_TOOLS = [
   "read_file", "write_file", "edit_file", "append_file", "list_directory",
   "find_files", "search_content", "delete_file", "move_file", "copy_file",
 ];
+
+function requireEmail(): EmailHandler {
+  if (!emailHandler) throw new Error("邮件未配置，请在配置页「邮件」标签中填写 IMAP/SMTP 信息");
+  return emailHandler;
+}
 
 function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> {
   const handlers: Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> = {
@@ -100,6 +139,68 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
       const ok = webchatApi.recordAiloReply(text ?? "", participantName ?? "");
       return ok ? "已发送" : "未找到对应用户或发送失败，请确认 participantName 与网页聊天中的称呼一致且用户在线。";
     },
+    // ── 邮件工具 ──
+    email_send: async (args) => {
+      const h = requireEmail();
+      await h.send({ to: args.to as string, cc: args.cc as string | undefined, bcc: args.bcc as string | undefined, subject: args.subject as string | undefined, body: args.body as string, html: args.html as string | undefined, attachments: args.attachments as any });
+      return `邮件已发送至 ${args.to}`;
+    },
+    email_reply: async (args) => {
+      const h = requireEmail();
+      await h.reply({ uid: args.uid as number, folder: args.folder as string | undefined, body: args.body as string, html: args.html as string | undefined, attachments: args.attachments as any });
+      return `已回复 uid=${args.uid}`;
+    },
+    email_forward: async (args) => {
+      const h = requireEmail();
+      await h.forward({ uid: args.uid as number, folder: args.folder as string | undefined, to: args.to as string, cc: args.cc as string | undefined, bcc: args.bcc as string | undefined, body: args.body as string | undefined });
+      return `已转发至 ${args.to}`;
+    },
+    email_list: async (args) => {
+      const h = requireEmail();
+      const items = await h.list({ folder: args.folder as string | undefined, limit: args.limit as number | undefined, offset: args.offset as number | undefined, unreadOnly: args.unread_only as boolean | undefined });
+      const lines = items.map((i) => `uid=${i.uid} ${i.isRead ? "✓" : "○"} ${i.from} | ${i.subject} | ${i.date}`);
+      return lines.length ? lines.join("\n") : "（无邮件）";
+    },
+    email_read: async (args) => {
+      const h = requireEmail();
+      const d = await h.read({ uid: args.uid as number, folder: args.folder as string | undefined });
+      if (!d) throw new Error(`uid=${args.uid} 不存在`);
+      const att = d.attachments.length ? `\n附件: ${d.attachments.map((a) => `${a.filename} (${a.size}B)`).join(", ")}` : "";
+      return `from: ${d.from}\nto: ${d.to}\nsubject: ${d.subject}\ndate: ${d.date}\n\n${d.text ?? d.html ?? ""}${att}`;
+    },
+    email_search: async (args) => {
+      const h = requireEmail();
+      const items = await h.search({ query: args.query as string | undefined, from: args.from as string | undefined, to: args.to as string | undefined, subject: args.subject as string | undefined, since: args.since as string | undefined, until: args.until as string | undefined, folder: args.folder as string | undefined, limit: args.limit as number | undefined });
+      const lines = items.map((i) => `uid=${i.uid} ${i.isRead ? "✓" : "○"} ${i.from} | ${i.subject} | ${i.date}`);
+      return lines.length ? lines.join("\n") : "（无匹配）";
+    },
+    email_mark_read: async (args) => {
+      const h = requireEmail();
+      const uids = args.uids as number[];
+      await h.markRead({ uids, read: args.read as boolean, folder: args.folder as string | undefined });
+      return `已标记 ${uids.length} 封为${args.read ? "已读" : "未读"}`;
+    },
+    email_move: async (args) => {
+      const h = requireEmail();
+      const uids = args.uids as number[];
+      await h.move({ uids, folder: args.folder as string, fromFolder: args.from_folder as string | undefined });
+      return `已移动 ${uids.length} 封到 ${args.folder}`;
+    },
+    email_delete: async (args) => {
+      const h = requireEmail();
+      const uids = args.uids as number[];
+      await h.deleteMessages({ uids, folder: args.folder as string | undefined });
+      return `已删除 ${uids.length} 封`;
+    },
+    email_get_attachment: async (args) => {
+      const h = requireEmail();
+      const filename = args.filename as string;
+      const localPath = await h.downloadAttachment({ uid: args.uid as number, folder: args.folder as string | undefined, filename });
+      if (!localPath) throw new Error(`附件 ${filename} 不存在`);
+      const mime = inferMime(localPath);
+      const mediaType = classifyMedia(mime);
+      return [mediaPart(mediaType, { type: mediaType, path: localPath, mime, name: filename })];
+    },
   };
   for (const name of FS_TOOLS) {
     handlers[name] = async (args) => fsTool(name, args);
@@ -114,7 +215,6 @@ async function main(): Promise<void> {
   const connectionState = {
     connected: false,
     endpointId: "",
-    displayName: "桌面Agent",
   };
   let webchatCtxRef: EndpointContext | null = null;
   let connectAttempt = 0;
@@ -133,7 +233,6 @@ async function main(): Promise<void> {
         ailoWsUrl: cfg.url,
         ailoApiKey: cfg.apiKey,
         endpointId: cfg.endpointId,
-        displayName: cfg.displayName ?? "桌面Agent",
         handler: {
           start: async (ctx) => {
             endpointCtx = ctx;
@@ -141,12 +240,21 @@ async function main(): Promise<void> {
             connectAttempt = 0;
             connectionState.connected = true;
             connectionState.endpointId = cfg.endpointId;
-            connectionState.displayName = cfg.displayName ?? "桌面Agent";
             webchatCtxRef = ctx;
             serverRef.notifyContextAttached();
+            // 启动邮件通道
+            const emailCfg = loadEmailConfig(configPath);
+            if (emailCfg) {
+              emailHandler = new EmailHandler(emailCfg);
+              await emailHandler.start(ctx);
+            }
             console.log("[desktop] 桌面端点已启动");
           },
           stop: async () => {
+            if (emailHandler) {
+              await emailHandler.stop();
+              emailHandler = null;
+            }
             endpointCtx = null;
             endpointConnecting = false;
             connectionState.connected = false;
@@ -158,7 +266,7 @@ async function main(): Promise<void> {
           },
         },
         caps: ["message", "tool_execute"],
-        blueprints: [BLUEPRINT_URL, BLUEPRINT_WEBCHAT],
+        blueprints: [BLUEPRINT_URL, BLUEPRINT_WEBCHAT, BLUEPRINT_EMAIL],
         tools: mcpManager.getAllPrivateTools(),
         toolHandlers: buildToolHandlers(),
         skills,
@@ -176,7 +284,6 @@ async function main(): Promise<void> {
               url: latest.url,
               apiKey: latest.apiKey,
               endpointId: latest.endpointId,
-              displayName: latest.displayName,
             });
           } catch (e) {
             console.error("[desktop] 重试连接失败:", e instanceof Error ? e.message : e);
@@ -210,7 +317,6 @@ async function main(): Promise<void> {
         url: config.ailoWsUrl,
         apiKey: config.ailoApiKey,
         endpointId: config.endpointId,
-        displayName: config.displayName,
       };
       if (endpointCtx) {
         await endpointCtx.client.reconnect(undefined, cfg);
@@ -218,6 +324,22 @@ async function main(): Promise<void> {
         await applyConnectionConfig(cfg);
       }
     },
+    onEmailConfigSaved: async () => {
+      if (!endpointCtx) return;
+      if (emailHandler) {
+        await emailHandler.stop();
+        emailHandler = null;
+      }
+      const emailCfg = loadEmailConfig(configPath);
+      if (emailCfg) {
+        emailHandler = new EmailHandler(emailCfg);
+        await emailHandler.start(endpointCtx);
+      }
+    },
+    getEmailStatus: () => ({
+      configured: !!loadEmailConfig(configPath),
+      running: emailHandler?.running ?? false,
+    }),
   });
 
   const initial = loadConnectionConfig(configPath);

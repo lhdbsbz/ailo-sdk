@@ -30,14 +30,12 @@ export async function runInit(useDefaults = false): Promise<void> {
   const wsUrl = useDefaults ? "ws://127.0.0.1:19800/ws" : await prompt("Ailo WebSocket URL", "ws://127.0.0.1:19800/ws");
   const apiKey = useDefaults ? "" : await prompt("API Key (留空稍后配置)");
   const endpointId = useDefaults ? "desktop-01" : await prompt("端点 ID", "desktop-01");
-  const displayName = useDefaults ? "桌面Agent" : await prompt("显示名称", "桌面Agent");
 
   const config = {
     ailo: {
       wsUrl,
       apiKey: apiKey || "",
       endpointId,
-      displayName,
     },
   };
 

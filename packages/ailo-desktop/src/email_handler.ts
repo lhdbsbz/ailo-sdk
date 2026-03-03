@@ -1,12 +1,8 @@
 /**
- * 邮件通道 Handler：ImapFlow 收信/读信/搜索/组织 + nodemailer 发信/回复/转发
+ * 邮件通道 — IMAP IDLE 收信 + nodemailer SMTP 发信
  *
- * 核心改进（vs imap callback 版）：
- * - IMAP IDLE：零延迟推送，取代 60s 轮询
- * - 自动重连：指数退避，断线自愈
- * - UIDVALIDITY 追踪：邮箱重建时正确重置
- * - getMailboxLock 互斥：工具操作与 IDLE 安全共存
- * - 全 async/await，无 callback 竞态
+ * 集成在 Desktop 端点中，与 webchat 等通道共享同一 EndpointContext。
+ * IMAP IDLE 实现零延迟推送，断线自动重连，UIDVALIDITY 追踪。
  */
 import { ImapFlow } from "imapflow";
 import type { FetchMessageObject } from "imapflow";
@@ -16,10 +12,10 @@ import nodemailer from "nodemailer";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { type EndpointHandler, type AcceptMessage, type EndpointContext, type ContextTag, textPart, mediaPart } from "@lmcl/ailo-endpoint-sdk";
-import { getWorkDir } from "@lmcl/ailo-endpoint-sdk";
+import type { EndpointContext, ContextTag, AcceptMessage } from "@lmcl/ailo-endpoint-sdk";
+import { textPart, mediaPart, inferMime, classifyMedia, getWorkDir } from "@lmcl/ailo-endpoint-sdk";
 
-export type EmailConfig = {
+export interface EmailConfig {
   imapHost: string;
   imapPort: number;
   imapUser: string;
@@ -28,20 +24,18 @@ export type EmailConfig = {
   smtpPort?: number;
   smtpUser?: string;
   smtpPassword?: string;
-  tls?: boolean;
-  tlsRejectUnauthorized?: boolean;
-};
+}
 
-export type EmailListItem = {
+export interface EmailListItem {
   uid: number;
   from: string;
   to: string;
   subject: string;
   date: string;
   isRead: boolean;
-};
+}
 
-export type EmailDetail = {
+export interface EmailDetail {
   uid: number;
   from: string;
   to: string;
@@ -50,17 +44,17 @@ export type EmailDetail = {
   text?: string;
   html?: string;
   attachments: { filename: string; contentType: string; size: number }[];
-};
+}
 
-type Checkpoint = {
+interface Checkpoint {
   lastUid: number;
   uidValidity: number;
-};
+}
 
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 60_000;
 
-export class EmailHandler implements EndpointHandler {
+export class EmailHandler {
   private config: EmailConfig;
   private ctx: EndpointContext | null = null;
   private imap: ImapFlow | null = null;
@@ -76,19 +70,28 @@ export class EmailHandler implements EndpointHandler {
   async start(ctx: EndpointContext): Promise<void> {
     this.ctx = ctx;
     this.stopped = false;
-    this.imapLoop().catch((err: unknown) => console.error("[email] fatal imapLoop error:", err));
+    this.imapLoop().catch((err: unknown) =>
+      console.error("[email] imapLoop fatal:", err),
+    );
+    console.log("[email] 邮件通道已启动");
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.imap) {
-      this.imap.close();
+      try { this.imap.close(); } catch { /* ignore */ }
       this.imap = null;
     }
     this.transporter = null;
+    this.ctx = null;
+    console.log("[email] 邮件通道已停止");
   }
 
-  // ── IMAP 主循环：连接 → IDLE → 断线重连 ──
+  get running(): boolean {
+    return !this.stopped && this.ctx !== null;
+  }
+
+  // ── IMAP 连接/IDLE 主循环 ──
 
   private async imapLoop(): Promise<void> {
     let attempt = 0;
@@ -96,19 +99,16 @@ export class EmailHandler implements EndpointHandler {
       try {
         await this.connectImap();
         attempt = 0;
-        this.ctx?.reportHealth("connected");
         await this.idleLoop();
       } catch (err) {
         if (this.stopped) break;
         console.error("[email] IMAP error:", (err as Error).message);
-        this.ctx?.reportHealth("error", (err as Error).message);
       }
       if (this.stopped) break;
       const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
       attempt++;
-      this.ctx?.reportHealth("reconnecting", `attempt ${attempt}, delay ${delay}ms`);
       console.error(`[email] IMAP reconnecting in ${delay}ms (attempt ${attempt})`);
-      await this.sleep(delay);
+      await sleep(delay);
     }
   }
 
@@ -121,12 +121,12 @@ export class EmailHandler implements EndpointHandler {
       host: this.config.imapHost,
       port: this.config.imapPort,
       auth: { user: this.config.imapUser, pass: this.config.imapPassword },
-      secure: this.config.tls ?? true,
-      tls: { rejectUnauthorized: this.config.tlsRejectUnauthorized ?? true },
+      secure: true,
+      tls: { rejectUnauthorized: false },
       logger: false,
     });
     await this.imap.connect();
-    console.error(`[email] IMAP connected to ${this.config.imapHost}`);
+    console.log(`[email] IMAP connected to ${this.config.imapHost}`);
     await this.restoreCheckpoint();
   }
 
@@ -138,7 +138,7 @@ export class EmailHandler implements EndpointHandler {
         const validity = box ? Number(box.uidValidity ?? 0) : 0;
         if (validity && validity !== this.uidValidity) {
           if (this.uidValidity !== 0) {
-            console.error(`[email] UIDVALIDITY changed (${this.uidValidity} → ${validity}), resetting lastUid`);
+            console.log(`[email] UIDVALIDITY changed (${this.uidValidity} → ${validity}), resetting`);
           }
           this.uidValidity = validity;
           this.lastUid = 0;
@@ -150,7 +150,7 @@ export class EmailHandler implements EndpointHandler {
       try {
         await this.imap.idle();
       } catch {
-        // IDLE interrupted (e.g. by a tool operation) — loop back
+        // IDLE interrupted — loop back
       }
     }
   }
@@ -181,16 +181,16 @@ export class EmailHandler implements EndpointHandler {
     if (maxUid > this.lastUid) {
       this.lastUid = maxUid;
       await this.saveCheckpoint();
-      if (count > 0) console.error(`[email] processed ${count} new message(s), lastUid=${this.lastUid}`);
+      if (count > 0) console.log(`[email] processed ${count} new message(s), lastUid=${this.lastUid}`);
     }
   }
 
-  // ── Checkpoint ──
+  // ── Checkpoint 持久化 ──
 
   private async saveCheckpoint(): Promise<void> {
     const cp: Checkpoint = { lastUid: this.lastUid, uidValidity: this.uidValidity };
     try {
-      await this.ctx!.storage.setData("checkpoint", JSON.stringify(cp));
+      await this.ctx!.storage.setData("email_checkpoint", JSON.stringify(cp));
     } catch (err) {
       console.error("[email] save checkpoint failed:", (err as Error).message);
     }
@@ -198,27 +198,18 @@ export class EmailHandler implements EndpointHandler {
 
   private async restoreCheckpoint(): Promise<void> {
     try {
-      const raw = await this.ctx!.storage.getData("checkpoint");
-      if (!raw) {
-        // 兼容旧版 last_uid 格式
-        const legacy = await this.ctx!.storage.getData("last_uid");
-        if (legacy) {
-          this.lastUid = parseInt(legacy, 10) || 0;
-          console.error(`[email] migrated legacy last_uid=${this.lastUid}`);
-          return;
-        }
-        return;
-      }
+      const raw = await this.ctx!.storage.getData("email_checkpoint");
+      if (!raw) return;
       const cp = JSON.parse(raw) as Partial<Checkpoint>;
       this.lastUid = cp.lastUid ?? 0;
       this.uidValidity = cp.uidValidity ?? 0;
-      console.error(`[email] restored checkpoint: lastUid=${this.lastUid}, uidValidity=${this.uidValidity}`);
+      console.log(`[email] restored checkpoint: lastUid=${this.lastUid}, uidValidity=${this.uidValidity}`);
     } catch (err) {
       console.error("[email] restore checkpoint failed:", (err as Error).message);
     }
   }
 
-  // ── 消息推送 ──
+  // ── 收信推送 ──
 
   private async emitMessage(parsed: ParsedMail): Promise<void> {
     if (!this.ctx) return;
@@ -227,7 +218,7 @@ export class EmailHandler implements EndpointHandler {
     const fromName = from?.name ?? fromAddr;
     const subject = parsed.subject ?? "（无主题）";
     const text = parsed.text ?? (typeof parsed.html === "string" ? parsed.html : "") ?? "";
-    const attachments = await this.saveAttachmentsToWorkdir(parsed);
+    const attachments = await this.saveAttachments(parsed);
 
     const contextTags: ContextTag[] = [
       { kind: "conv_type", value: "私聊", groupWith: true },
@@ -237,19 +228,11 @@ export class EmailHandler implements EndpointHandler {
     ];
 
     const content: AcceptMessage["content"] = [];
-    const bodyText = `[主题: ${subject}]\n\n${text}`.trim();
+    const bodyText = `[邮件 · 主题: ${subject}]\n\n${text}`.trim();
     if (bodyText) content.push(textPart(bodyText));
     for (const a of attachments) {
-      const typ = (a.type ?? "file").toLowerCase();
-      const mediaType = ["image", "audio", "video", "pdf", "file"].includes(typ) ? typ : "file";
-      content.push(
-        mediaPart(mediaType as "image" | "audio" | "video" | "pdf" | "file", {
-          type: a.type ?? "file",
-          path: a.path,
-          mime: a.mime,
-          name: a.name,
-        })
-      );
+      const mediaType = classifyMedia(a.mime ?? "application/octet-stream");
+      content.push(mediaPart(mediaType, { type: mediaType, path: a.path, mime: a.mime, name: a.name }));
     }
 
     try {
@@ -259,7 +242,7 @@ export class EmailHandler implements EndpointHandler {
     }
   }
 
-  // ── IMAP 工具操作（mailbox lock 保证与 IDLE 互斥）──
+  // ── IMAP 工具操作 ──
 
   private async withMailbox<T>(folder: string, fn: (imap: ImapFlow) => Promise<T>): Promise<T> {
     if (!this.imap?.usable) throw new Error("IMAP 未连接");
@@ -278,7 +261,7 @@ export class EmailHandler implements EndpointHandler {
     unreadOnly?: boolean;
   }): Promise<EmailListItem[]> {
     const folder = opts.folder ?? "INBOX";
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+    const limit = clamp(opts.limit ?? 50, 1, 200);
     const offset = Math.max(0, opts.offset ?? 0);
 
     return this.withMailbox(folder, async (imap) => {
@@ -293,10 +276,10 @@ export class EmailHandler implements EndpointHandler {
 
       const items: EmailListItem[] = [];
       for await (const msg of imap.fetch(slice.join(","), { uid: true, envelope: true, flags: true }, { uid: true })) {
-        const from = msg.envelope?.from?.[0];
+        const f = msg.envelope?.from?.[0];
         items.push({
           uid: msg.uid,
-          from: from ? `${from.name ?? ""} <${from.address ?? ""}>`.trim() : "",
+          from: f ? `${f.name ?? ""} <${f.address ?? ""}>`.trim() : "",
           to: msg.envelope?.to?.map((a: { address?: string }) => a.address).filter(Boolean).join(", ") ?? "",
           subject: msg.envelope?.subject ?? "（无主题）",
           date: msg.envelope?.date?.toISOString() ?? "",
@@ -323,7 +306,9 @@ export class EmailHandler implements EndpointHandler {
 
       const from = parsed.from?.value?.[0];
       const toObj = parsed.to;
-      const toAddrs = toObj ? (Array.isArray(toObj) ? toObj : [toObj]).flatMap((t) => t.value.map((v) => v.address)).filter(Boolean).join(", ") : "";
+      const toAddrs = toObj
+        ? (Array.isArray(toObj) ? toObj : [toObj]).flatMap((t) => t.value.map((v) => v.address)).filter(Boolean).join(", ")
+        : "";
       return {
         uid: opts.uid,
         from: from ? `${from.name ?? ""} <${from.address ?? ""}>`.trim() : "",
@@ -352,7 +337,7 @@ export class EmailHandler implements EndpointHandler {
     limit?: number;
   }): Promise<EmailListItem[]> {
     const folder = opts.folder ?? "INBOX";
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+    const limit = clamp(opts.limit ?? 50, 1, 200);
 
     return this.withMailbox(folder, async (imap) => {
       const criteria: Record<string, unknown> = {};
@@ -363,17 +348,17 @@ export class EmailHandler implements EndpointHandler {
       if (opts.until) criteria.before = new Date(opts.until);
       if (opts.query) criteria.body = opts.query;
 
-      const searchResult = await imap.search(criteria, { uid: true });
-      const uids = Array.isArray(searchResult) ? searchResult : [];
+      const result = await imap.search(criteria, { uid: true });
+      const uids = Array.isArray(result) ? result : [];
       const sorted = [...uids].sort((a, b) => b - a).slice(0, limit);
       if (sorted.length === 0) return [];
 
       const items: EmailListItem[] = [];
       for await (const msg of imap.fetch(sorted.join(","), { uid: true, envelope: true, flags: true }, { uid: true })) {
-        const from = msg.envelope?.from?.[0];
+        const f = msg.envelope?.from?.[0];
         items.push({
           uid: msg.uid,
-          from: from ? `${from.name ?? ""} <${from.address ?? ""}>`.trim() : "",
+          from: f ? `${f.name ?? ""} <${f.address ?? ""}>`.trim() : "",
           to: msg.envelope?.to?.map((a: { address?: string }) => a.address).filter(Boolean).join(", ") ?? "",
           subject: msg.envelope?.subject ?? "（无主题）",
           date: msg.envelope?.date?.toISOString() ?? "",
@@ -389,11 +374,8 @@ export class EmailHandler implements EndpointHandler {
     if (uids.length === 0) return;
     await this.withMailbox(opts.folder ?? "INBOX", async (imap) => {
       const range = uids.join(",");
-      if (opts.read) {
-        await imap.messageFlagsAdd(range, ["\\Seen"], { uid: true });
-      } else {
-        await imap.messageFlagsRemove(range, ["\\Seen"], { uid: true });
-      }
+      if (opts.read) await imap.messageFlagsAdd(range, ["\\Seen"], { uid: true });
+      else await imap.messageFlagsRemove(range, ["\\Seen"], { uid: true });
     });
   }
 
@@ -405,7 +387,7 @@ export class EmailHandler implements EndpointHandler {
     });
   }
 
-  async delete(opts: { uids: number[]; folder?: string }): Promise<void> {
+  async deleteMessages(opts: { uids: number[]; folder?: string }): Promise<void> {
     const uids = opts.uids.slice(0, 500);
     if (uids.length === 0) return;
     await this.withMailbox(opts.folder ?? "INBOX", async (imap) => {
@@ -427,8 +409,7 @@ export class EmailHandler implements EndpointHandler {
       const att = parsed.attachments?.find((a) => (a.filename ?? "") === opts.filename);
       if (!att?.content || !Buffer.isBuffer(att.content)) return null;
 
-      const workDir = getWorkDir() ?? os.tmpdir();
-      const outDir = path.join(workDir, "blobs");
+      const outDir = path.join(getWorkDir() ?? os.tmpdir(), "blobs");
       await fs.promises.mkdir(outDir, { recursive: true });
       const safeName = (att.filename ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
       const outPath = path.join(outDir, `${Date.now()}_${safeName}`);
@@ -437,27 +418,19 @@ export class EmailHandler implements EndpointHandler {
     });
   }
 
-  // ── SMTP ──
-
-  private getSmtpConfig() {
-    const host = this.config.smtpHost
-      ?? this.config.imapHost.replace(/^imap\./, "smtp.");
-    return {
-      host,
-      port: this.config.smtpPort ?? 465,
-      user: this.config.smtpUser ?? this.config.imapUser,
-      pass: this.config.smtpPassword ?? this.config.imapPassword,
-    };
-  }
+  // ── SMTP 发信 ──
 
   private ensureTransporter(): nodemailer.Transporter {
     if (!this.transporter) {
-      const smtp = this.getSmtpConfig();
+      const host = this.config.smtpHost ?? this.config.imapHost.replace(/^imap\./, "smtp.");
+      const port = this.config.smtpPort ?? 465;
+      const user = this.config.smtpUser ?? this.config.imapUser;
+      const pass = this.config.smtpPassword ?? this.config.imapPassword;
       this.transporter = nodemailer.createTransport({
-        host: smtp.host,
-        port: smtp.port,
-        secure: smtp.port === 465,
-        auth: { user: smtp.user, pass: smtp.pass },
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
       });
     }
     return this.transporter;
@@ -503,10 +476,9 @@ export class EmailHandler implements EndpointHandler {
 
     const to = parsed.from?.value?.[0]?.address ?? "";
     const subj = parsed.subject?.startsWith("Re:") ? parsed.subject : `Re: ${parsed.subject ?? ""}`;
-    const inReplyTo = parsed.messageId;
     const refs = Array.isArray(parsed.references)
       ? parsed.references.join(" ")
-      : (parsed.references ?? inReplyTo ?? "");
+      : (parsed.references ?? parsed.messageId ?? "");
 
     await this.ensureTransporter().sendMail({
       from: this.config.imapUser,
@@ -514,7 +486,7 @@ export class EmailHandler implements EndpointHandler {
       subject: subj,
       text: opts.body,
       html: opts.html,
-      inReplyTo,
+      inReplyTo: parsed.messageId,
       references: refs,
       attachments: opts.attachments?.map((a) => ({
         filename: a.filename,
@@ -554,14 +526,10 @@ export class EmailHandler implements EndpointHandler {
     });
   }
 
-  async sendText(to: string, text: string, subject?: string): Promise<void> {
-    await this.send({ to, body: text, subject });
-  }
+  // ── 内部工具 ──
 
-  // ── Helpers ──
-
-  private async saveAttachmentsToWorkdir(
-    parsed: ParsedMail
+  private async saveAttachments(
+    parsed: ParsedMail,
   ): Promise<Array<{ type: string; path: string; mime?: string; name?: string }>> {
     if (!parsed.attachments?.length) return [];
     const workDir = getWorkDir();
@@ -586,19 +554,19 @@ export class EmailHandler implements EndpointHandler {
       try {
         await fs.promises.writeFile(outPath, a.content);
         const mime = a.contentType ?? "application/octet-stream";
-        const type = mime.startsWith("image/") ? "image"
-          : mime.startsWith("audio/") ? "audio"
-          : mime.startsWith("video/") ? "video"
-          : "file";
-        out.push({ type, path: outPath, mime, name: a.filename ?? filename });
+        out.push({ type: classifyMedia(mime), path: outPath, mime, name: a.filename ?? filename });
       } catch {
-        // skip this attachment on write failure
+        /* skip */
       }
     }
     return out;
   }
+}
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms));
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
 }

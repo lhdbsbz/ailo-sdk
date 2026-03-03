@@ -70,7 +70,7 @@ Endpoints declare their capabilities during the connection handshake. The server
 
 ## 4. Blueprints
 
-A **Blueprint** is a standalone device/channel specification document, addressed by URL. It defines the capabilities, tools, and usage instructions for a class of endpoints.
+A **Blueprint** is a standalone endpoint specification document, addressed by URL. It defines the capabilities, tools, and usage instructions for a class of endpoints.
 
 Key properties:
 - **Standalone**: Blueprints exist independently of any endpoint — host them on GitHub, a CDN, or your own server
@@ -179,7 +179,6 @@ Endpoints reference blueprints via the `blueprints` field during `connect`:
     "role": "endpoint",
     "apiKey": "ailo_ep_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "endpointId": "robot-01",
-    "displayName": "Living Room Robot",
     "caps": ["world_update", "tool_execute", "intent"],
     "sdkVersion": "1.0.0",
     "blueprints": [
@@ -586,6 +585,6 @@ The SDK uses standard WebSocket ping/pong (no application-layer frames):
    Server → Feishu: res(ok=true, accepted=true)
 
 3. Server processes and invokes the reply tool
-   Server → Feishu: event(tool_request, name=feishu-channel:send, args={chat_id:oc_xxx, text:"Hello!"})
+   Server → Feishu: event(tool_request, name=feishu:send, args={chat_id:oc_xxx, text:"Hello!"})
    Feishu → Server: tool_response(id=req_xxx, success=true)
 ```

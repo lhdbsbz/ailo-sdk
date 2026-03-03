@@ -158,6 +158,50 @@ export type FileFetchResponse = {
   size: number;
 };
 
+/** Received via dir_list request — server asks endpoint to list a local directory */
+export type DirListRequest = {
+  path: string;
+};
+
+export type DirListEntry = {
+  name: string;
+  type: "file" | "dir";
+  size: number;
+  mtime?: string;
+};
+
+export type DirListResponse = {
+  entries: DirListEntry[];
+};
+
+/** Received via file_push request — server asks endpoint to download a file and save locally.
+ *  When local_source is present, the file is on the same filesystem — do a local copy instead of download. */
+export type FilePushRequest = {
+  url?: string;
+  local_source?: string;
+  target_path: string;
+};
+
+export type FilePushResponse = {
+  size: number;
+};
+
+/** Filesystem probe marker — written on connect, used to detect co-located endpoints */
+export type FsProbeMarker = {
+  path: string;
+  nonce: string;
+};
+
+/** Received via fs_probe request — server asks endpoint to read a probe file */
+export type FsProbeRequest = {
+  path: string;
+};
+
+export type FsProbeResponse = {
+  content: string;
+  found: boolean;
+};
+
 // ─── Tool handler ─────────────────────────────────────────────────────────────
 
 /** Tool handler return type: ContentPart[] for multimodal results, or any other value for legacy text results. */

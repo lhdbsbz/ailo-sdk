@@ -1,5 +1,9 @@
 /**
- * FileRef URI utilities.
+ * FileRef URI utilities — internal transport mechanism only.
+ *
+ * FileRef URIs are used internally by Gateway and endpoint SDK for Blob-based
+ * file transfer. The LLM never sees these URIs; it works with (endpoint_id, path)
+ * tuples instead. Endpoint tools only operate on local paths.
  *
  * URI formats:
  *   ailo://blob/{blob_id}              — Server-side Blob storage

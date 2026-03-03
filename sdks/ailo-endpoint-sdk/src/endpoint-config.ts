@@ -1,8 +1,8 @@
 /**
- * Generic channel config server factory.
+ * Generic endpoint config server factory.
  *
- * Provides a web UI + REST API for configuring any channel endpoint:
- *  - Ailo connection fields (common to all channels)
+ * Provides a web UI + REST API for configuring any endpoint:
+ *  - Ailo connection fields (common to all endpoints)
  *  - Platform-specific fields (declared via platformFields)
  *  - Reads/writes config.json, merges with env vars
  *  - Env-overridden fields shown as readonly in the UI
@@ -23,13 +23,13 @@ export interface ConfigField {
   required?: boolean;
 }
 
-export interface ChannelConfigServerOptions {
-  channelName: string;
+export interface EndpointConfigServerOptions {
+  endpointName: string;
   defaultPort: number;
   configPath?: string;
   platformFields: ConfigField[];
   envMapping?: EnvMapping[];
-  getConnectionStatus: () => { connected: boolean; endpointId: string; displayName: string };
+  getConnectionStatus: () => { connected: boolean; endpointId: string };
   onConfigSaved?: (config: Record<string, unknown>) => Promise<void>;
 }
 
@@ -70,9 +70,9 @@ function buildEnvMapping(platformFields: ConfigField[], extra?: EnvMapping[]): E
   return mapping;
 }
 
-export function startChannelConfigServer(options: ChannelConfigServerOptions): void {
+export function startEndpointConfigServer(options: EndpointConfigServerOptions): void {
   const {
-    channelName,
+    endpointName,
     defaultPort,
     platformFields,
     getConnectionStatus,
@@ -97,13 +97,13 @@ export function startChannelConfigServer(options: ChannelConfigServerOptions): v
     try {
       if (path === "/" || path === "/index.html") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(buildUIHTML(channelName, platformFields));
+        res.end(buildUIHTML(endpointName, platformFields));
         return;
       }
       if (path === "/api/status" && req.method === "GET") {
-        let status: { connected: boolean; endpointId: string; displayName: string };
+        let status: { connected: boolean; endpointId: string };
         try { status = getConnectionStatus(); } catch {
-          status = { connected: false, endpointId: "", displayName: channelName };
+          status = { connected: false, endpointId: "" };
         }
         return json(res, status);
       }
@@ -154,11 +154,11 @@ export function startChannelConfigServer(options: ChannelConfigServerOptions): v
   });
 
   server.listen(defaultPort, "0.0.0.0", () => {
-    console.log(`[${channelName}] 配置界面: http://127.0.0.1:${defaultPort}`);
+    console.log(`[${endpointName}] 配置界面: http://127.0.0.1:${defaultPort}`);
   });
   server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") console.log(`[${channelName}] 端口 ${defaultPort} 已被占用，跳过配置界面`);
-    else console.error(`[${channelName}] 配置服务启动失败:`, err.message);
+    if (err.code === "EADDRINUSE") console.log(`[${endpointName}] 端口 ${defaultPort} 已被占用，跳过配置界面`);
+    else console.error(`[${endpointName}] 配置服务启动失败:`, err.message);
   });
 }
 
@@ -180,14 +180,13 @@ function buildFieldHTML(f: ConfigField): string {
   return `    <div class="form-group"><label>${esc(f.label)}${f.required ? " *" : ""}${envHint}</label><input id="${id}" type="${inputType}" placeholder="${ph}" autocomplete="off"></div>`;
 }
 
-function buildUIHTML(channelName: string, platformFields: ConfigField[]): string {
+function buildUIHTML(endpointName: string, platformFields: ConfigField[]): string {
   const platformFormHTML = platformFields.map(f => buildFieldHTML(f)).join("\n");
 
   const ailoFields: ConfigField[] = [
     { key: "ailo.wsUrl", label: "AILO_WS_URL", envVar: "AILO_WS_URL", placeholder: "ws://127.0.0.1:19800/ws", required: true },
     { key: "ailo.apiKey", label: "AILO_API_KEY", envVar: "AILO_API_KEY", placeholder: "ailo_ep_xxx", required: true },
-    { key: "ailo.endpointId", label: "AILO_ENDPOINT_ID", envVar: "AILO_ENDPOINT_ID", placeholder: channelName.toLowerCase() + "-01", required: true },
-    { key: "ailo.displayName", label: "DISPLAY_NAME（可选）", envVar: "DISPLAY_NAME", placeholder: channelName },
+    { key: "ailo.endpointId", label: "AILO_ENDPOINT_ID", envVar: "AILO_ENDPOINT_ID", placeholder: endpointName.toLowerCase() + "-01", required: true },
   ];
   const ailoFormHTML = ailoFields.map(f => buildFieldHTML(f)).join("\n");
 
@@ -199,7 +198,7 @@ function buildUIHTML(channelName: string, platformFields: ConfigField[]): string
 <html lang="zh">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ailo ${esc(channelName)}通道 - 配置</title>
+<title>Ailo ${esc(endpointName)} - 配置</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{
@@ -232,7 +231,7 @@ input[readonly]{opacity:.6;cursor:not-allowed}
 </head>
 <body>
 <div class="container">
-  <h1><span class="dot off" id="dot"></span> Ailo ${esc(channelName)}通道 <span id="statusText" style="font-size:14px;color:#9ca3af"></span></h1>
+  <h1><span class="dot off" id="dot"></span> Ailo ${esc(endpointName)} <span id="statusText" style="font-size:14px;color:#9ca3af"></span></h1>
   <p class="subtitle">在下方填写配置信息，保存后会自动使用新配置连接，无需重启进程。</p>
 
   <div class="card">
@@ -241,11 +240,10 @@ input[readonly]{opacity:.6;cursor:not-allowed}
   </div>
 
 ${platformFields.length > 0 ? `  <div class="card">
-    <h2>${esc(channelName)}配置</h2>
+    <h2>${esc(endpointName)} 平台配置</h2>
 ${platformFormHTML}
   </div>
-` : ""}
-  <div class="card">
+` : ""}  <div class="card">
     <h2>Ailo 连接配置</h2>
     <p class="desc">由 Ailo 端点管理下发的连接信息，或本地开发时填写。</p>
 ${ailoFormHTML}
@@ -264,7 +262,7 @@ function esc(s){var t=String(s==null?'':s);var d=document.createElement('div');d
 function showStatus(data){
   var dot=el('dot'),st=el('statusText'),info=el('statusInfo');
   if(!dot||!st||!info)return;
-  if(data&&data.connected){dot.className='dot on';st.textContent='已连接';info.innerHTML='<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+esc(data.endpointId)+'</span></div><div class="info-row"><span class="info-label">显示名</span><span class="info-value">'+esc(data.displayName||'-')+'</span></div>'}
+  if(data&&data.connected){dot.className='dot on';st.textContent='已连接';info.innerHTML='<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+esc(data.endpointId)+'</span></div>'}
   else{dot.className='dot off';st.textContent='未连接';info.innerHTML='<div class="info-row"><span class="info-value">尚未连接 Ailo。请填写下方配置并保存。</span></div>'}
 }
 function getVal(path,obj){var p=path.split('.');var c=obj;for(var i=0;i<p.length;i++){if(c==null)return '';c=c[p[i]]}return c==null?'':c}

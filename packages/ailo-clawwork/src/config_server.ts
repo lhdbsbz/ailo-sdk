@@ -11,14 +11,13 @@ import {
 const SIDECAR_URL = process.env.CLAWWORK_SIDECAR_URL ?? "http://localhost:8020";
 
 interface ConfigServerDeps {
-  getConnectionStatus: () => { connected: boolean; endpointId: string; displayName: string };
+  getConnectionStatus: () => { connected: boolean; endpointId: string };
   port: number;
   configPath: string;
   onConnectionConfigSaved?: (config: {
     ailoWsUrl: string;
     ailoApiKey: string;
     endpointId: string;
-    displayName?: string;
   }) => Promise<void>;
 }
 
@@ -99,14 +98,13 @@ function getConnectionConfig(configPath: string) {
     ailoWsUrl: url || undefined,
     ailoApiKey: key || undefined,
     endpointId: id || undefined,
-    displayName: (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) || undefined,
   };
 }
 
 async function saveConnectionConfig(
   configPath: string,
   bodyStr: string,
-  onSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string; displayName?: string }) => Promise<void>,
+  onSaved?: (config: { ailoWsUrl: string; ailoApiKey: string; endpointId: string }) => Promise<void>,
 ) {
   try {
     const existing = readConfig(configPath) as Record<string, unknown>;
@@ -114,15 +112,13 @@ async function saveConnectionConfig(
     if (b.ailoWsUrl !== undefined) setNestedValue(existing, "ailo.wsUrl", b.ailoWsUrl);
     if (b.ailoApiKey !== undefined) setNestedValue(existing, "ailo.apiKey", b.ailoApiKey);
     if (b.endpointId !== undefined) setNestedValue(existing, "ailo.endpointId", b.endpointId);
-    if (b.displayName !== undefined) setNestedValue(existing, "ailo.displayName", b.displayName);
     writeConfig(configPath, existing);
     const { merged } = mergeWithEnv(existing, AILO_ENV_MAPPING);
     const ailoWsUrl = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
     const ailoApiKey = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
     const endpointId = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
-    const displayName = (getNestedValue(merged as Record<string, unknown>, "ailo.displayName") as string) ?? undefined;
     if (onSaved && ailoWsUrl && ailoApiKey && endpointId) {
-      await onSaved({ ailoWsUrl, ailoApiKey, endpointId, displayName });
+      await onSaved({ ailoWsUrl, ailoApiKey, endpointId });
       return { ok: true, message: "已保存，正在使用新配置连接…" };
     }
     return { ok: true, message: "已保存。" };
@@ -194,7 +190,6 @@ td{padding:8px 12px;border-bottom:1px solid #2d3139}
       <div class="form-group"><label>AILO_WS_URL</label><input id="connWsUrl" placeholder="ws://127.0.0.1:19800/ws"></div>
       <div class="form-group"><label>AILO_API_KEY</label><input id="connApiKey" placeholder="ailo_ep_xxx"></div>
       <div class="form-group"><label>AILO_ENDPOINT_ID</label><input id="connEndpointId" placeholder="clawwork-01"></div>
-      <div class="form-group"><label>显示名（可选）</label><input id="connDisplayName" placeholder="ClawWork打工"></div>
       <button class="btn btn-primary" onclick="saveConnection()">保存并连接</button>
       <span id="saveMsg" style="margin-left:10px;font-size:14px;color:#9ca3af"></span>
     </div>
@@ -245,8 +240,7 @@ async function loadStatus(){
     document.getElementById('statusText').textContent=s.connected?'已连接':'未连接';
     document.getElementById('statusInfo').innerHTML=
       '<div class="info-row"><span class="info-label">状态</span><span class="info-value">'+(s.connected?'<span class="badge on">已连接</span>':'<span class="badge off">未连接</span>')+'</span></div>'+
-      '<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+(s.endpointId||'-')+'</span></div>'+
-      '<div class="info-row"><span class="info-label">显示名</span><span class="info-value">'+(s.displayName||'-')+'</span></div>';
+      '<div class="info-row"><span class="info-label">端点 ID</span><span class="info-value">'+(s.endpointId||'-')+'</span></div>';
   }catch(e){document.getElementById('statusInfo').textContent='加载失败';}
 }
 
@@ -273,7 +267,6 @@ async function loadConnectionForm(){
     document.getElementById('connWsUrl').value=c.ailoWsUrl||'';
     document.getElementById('connApiKey').value=c.ailoApiKey||'';
     document.getElementById('connEndpointId').value=c.endpointId||'';
-    document.getElementById('connDisplayName').value=c.displayName||'';
   }catch(e){}
 }
 
@@ -282,8 +275,7 @@ async function saveConnection(){
   const d={
     ailoWsUrl:document.getElementById('connWsUrl').value.trim(),
     ailoApiKey:document.getElementById('connApiKey').value.trim(),
-    endpointId:document.getElementById('connEndpointId').value.trim(),
-    displayName:document.getElementById('connDisplayName').value.trim()
+    endpointId:document.getElementById('connEndpointId').value.trim()
   };
   if(!d.ailoWsUrl||!d.ailoApiKey||!d.endpointId){msg.textContent='请填写前三项';msg.style.color='#f87171';return;}
   try{

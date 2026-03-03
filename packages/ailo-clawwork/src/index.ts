@@ -154,7 +154,7 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
 // ── Main (config-based connection, same pattern as ailo-desktop) ────────────
 
 async function main(): Promise<void> {
-  const connectionState = { connected: false, endpointId: "", displayName: "ClawWork" };
+  const connectionState = { connected: false, endpointId: "" };
   let endpointCtx: EndpointContext | null = null;
   let connectAttempt = 0;
   let endpointConnecting = false;
@@ -171,7 +171,6 @@ async function main(): Promise<void> {
         ailoWsUrl: cfg.url,
         ailoApiKey: cfg.apiKey,
         endpointId: cfg.endpointId,
-        displayName: cfg.displayName ?? "ClawWork",
         handler: {
           start: async (ctx) => {
             endpointCtx = ctx;
@@ -179,7 +178,6 @@ async function main(): Promise<void> {
             connectAttempt = 0;
             connectionState.connected = true;
             connectionState.endpointId = cfg.endpointId;
-            connectionState.displayName = cfg.displayName ?? "ClawWork";
             console.log("[clawwork] 端点已连接到 Ailo Gateway");
           },
           stop: async () => {
@@ -207,7 +205,6 @@ async function main(): Promise<void> {
               url: latest.url,
               apiKey: latest.apiKey,
               endpointId: latest.endpointId,
-              displayName: latest.displayName,
             });
           } catch (e) {
             console.error("[clawwork] 重试失败:", e instanceof Error ? e.message : e);
@@ -229,7 +226,6 @@ async function main(): Promise<void> {
         url: config.ailoWsUrl,
         apiKey: config.ailoApiKey,
         endpointId: config.endpointId,
-        displayName: config.displayName,
       };
       if (endpointCtx) {
         await endpointCtx.client.reconnect(undefined, cfg);

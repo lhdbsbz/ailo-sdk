@@ -9,6 +9,6 @@ export async function sendFile(ctx: EndpointContext, filePath: string): Promise<
   if (!fs.statSync(filePath).isFile()) {
     throw new Error(`路径不是文件: ${filePath}`);
   }
-  const fileRef = await ctx.sendFile(filePath);
-  return `文件已发送：${path.basename(filePath)} (${fileRef})`;
+  await ctx.sendFile(filePath);
+  return `文件已发送：${path.basename(filePath)}（路径: ${filePath}）`;
 }

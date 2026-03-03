@@ -2,7 +2,6 @@ export interface AiloConnectionConfig {
   url: string;
   apiKey: string;
   endpointId: string;
-  displayName?: string;
 }
 
 export function hasValidConfig(c: AiloConnectionConfig): boolean {
@@ -30,5 +29,4 @@ export const AILO_ENV_MAPPING = [
   { envVar: "AILO_WS_URL", configPath: "ailo.wsUrl" },
   { envVar: "AILO_API_KEY", configPath: "ailo.apiKey" },
   { envVar: "AILO_ENDPOINT_ID", configPath: "ailo.endpointId" },
-  { envVar: "DISPLAY_NAME", configPath: "ailo.displayName" },
 ];

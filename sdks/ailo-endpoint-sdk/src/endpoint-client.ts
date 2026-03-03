@@ -1,6 +1,8 @@
 import WebSocket from "ws";
 import fs from "fs";
+import os from "os";
 import path from "path";
+import crypto from "crypto";
 import type {
   AcceptMessage,
   ContentPart,
@@ -16,6 +18,10 @@ import type {
   HealthStatus,
   EndpointStorage,
   FileFetchRequest,
+  DirListRequest,
+  FilePushRequest,
+  FsProbeMarker,
+  FsProbeRequest,
 } from "./types.js";
 
 const SDK_VERSION = "1.0.0";
@@ -77,8 +83,6 @@ export interface EndpointClientConfig {
   apiKey: string;
   /** Unique identifier for this endpoint, e.g. "robot-01" */
   endpointId: string;
-  /** Human-readable display name */
-  displayName: string;
   /** Capability list — determines which messages this endpoint sends/receives */
   caps: string[];
   /**
@@ -99,7 +103,7 @@ export interface EndpointClientConfig {
 
 /** Connection-only fields for hot-reloading config (passed as second arg to reconnect) */
 export type ConnectionOverrides = Partial<
-  Pick<EndpointClientConfig, "url" | "apiKey" | "endpointId" | "displayName">
+  Pick<EndpointClientConfig, "url" | "apiKey" | "endpointId">
 >;
 
 // ─── EndpointClient ───────────────────────────────────────────────────────────
@@ -136,10 +140,12 @@ export class EndpointClient implements EndpointStorage {
   private signalHandlers = new Map<string, SignalHandler[]>();
   private evictedHandler: EvictedHandler | null = null;
   private mediaPushHandlers: MediaPushHandler[] = [];
+  private fsProbeMarker: FsProbeMarker | null = null;
 
   constructor(config: EndpointClientConfig) {
     this.cfg = config;
     this.offlineBufferMax = config.offlineBufferSize ?? OFFLINE_BUFFER_MAX;
+    this.fsProbeMarker = this.writeFsProbeFile();
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
@@ -156,21 +162,24 @@ export class EndpointClient implements EndpointStorage {
     this.rejectAllPending(new Error("client closed"));
     this.offlineBuffer.length = 0;
     if (this.ws) { this.ws.close(); this.ws = null; }
+    if (this.fsProbeMarker) {
+      try { fs.unlinkSync(this.fsProbeMarker.path); } catch {}
+      this.fsProbeMarker = null;
+    }
   }
 
   /**
    * Reconnect with optional updated skills and/or connection config.
    * - skills: so the server gets the latest enabled skills without restarting.
-   * - connectionOverrides: url/apiKey/endpointId/displayName — disconnect, wait ~1s, then connect with new config.
+   * - connectionOverrides: url/apiKey/endpointId — disconnect, wait ~1s, then connect with new config.
    */
   async reconnect(skills?: SkillMeta[], connectionOverrides?: ConnectionOverrides): Promise<void> {
     if (skills !== undefined) this.cfg = { ...this.cfg, skills };
     if (connectionOverrides) {
-      const { url, apiKey, endpointId, displayName } = connectionOverrides;
+      const { url, apiKey, endpointId } = connectionOverrides;
       if (url !== undefined) this.cfg = { ...this.cfg, url };
       if (apiKey !== undefined) this.cfg = { ...this.cfg, apiKey };
       if (endpointId !== undefined) this.cfg = { ...this.cfg, endpointId };
-      if (displayName !== undefined) this.cfg = { ...this.cfg, displayName };
     }
     this.intentionalClose = true;
     if (this.reconnectTimer) {
@@ -363,7 +372,6 @@ export class EndpointClient implements EndpointStorage {
         role: "endpoint",
         apiKey: this.cfg.apiKey,
         endpointId: this.cfg.endpointId,
-        displayName: this.cfg.displayName,
         caps: this.cfg.caps,
         sdkVersion: SDK_VERSION,
       };
@@ -373,6 +381,7 @@ export class EndpointClient implements EndpointStorage {
         connectParams.blueprints = this.cfg.blueprints.map(resolveBlueprintPath);
       }
       if (this.cfg.skills && this.cfg.skills.length > 0) connectParams.skills = this.cfg.skills;
+      if (this.fsProbeMarker) connectParams.fsProbe = this.fsProbeMarker;
       ws.send(JSON.stringify({ type: "req", id, method: "connect", params: connectParams }));
     });
   }
@@ -480,6 +489,27 @@ export class EndpointClient implements EndpointStorage {
         void this.handleFileFetch(reqId, payload);
         break;
       }
+      case "dir_list": {
+        const reqId = frame.id;
+        if (!reqId) break;
+        const payload = frame.payload as DirListRequest;
+        void this.handleDirList(reqId, payload);
+        break;
+      }
+      case "file_push": {
+        const reqId = frame.id;
+        if (!reqId) break;
+        const payload = frame.payload as FilePushRequest;
+        void this.handleFilePush(reqId, payload);
+        break;
+      }
+      case "fs_probe": {
+        const reqId = frame.id;
+        if (!reqId) break;
+        const payload = frame.payload as FsProbeRequest;
+        void this.handleFsProbe(reqId, payload);
+        break;
+      }
       default:
         break;
     }
@@ -581,6 +611,104 @@ export class EndpointClient implements EndpointStorage {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[endpoint] file_fetch error:", msg);
       await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
+    }
+  }
+
+  private async handleDirList(reqId: string, payload: DirListRequest): Promise<void> {
+    try {
+      const dirPath = payload.path;
+      if (!fs.existsSync(dirPath)) {
+        await this.toolResponse({ id: reqId, success: false, error: `directory not found: ${dirPath}` });
+        return;
+      }
+      const stat = fs.statSync(dirPath);
+      if (!stat.isDirectory()) {
+        await this.toolResponse({ id: reqId, success: false, error: `not a directory: ${dirPath}` });
+        return;
+      }
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const result = {
+        entries: entries
+          .filter((e) => e.isFile() || e.isDirectory())
+          .map((e) => {
+            const fullPath = path.join(dirPath, e.name);
+            try {
+              const s = fs.statSync(fullPath);
+              return {
+                name: e.name,
+                type: e.isDirectory() ? "dir" : "file",
+                size: s.size,
+                mtime: s.mtime.toISOString(),
+              };
+            } catch {
+              return { name: e.name, type: e.isDirectory() ? "dir" : "file", size: 0 };
+            }
+          }),
+      };
+      await this.toolResponse({ id: reqId, success: true, result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[endpoint] dir_list error:", msg);
+      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
+    }
+  }
+
+  private async handleFilePush(reqId: string, payload: FilePushRequest): Promise<void> {
+    try {
+      const targetPath = payload.target_path;
+      const dir = path.dirname(targetPath);
+      fs.mkdirSync(dir, { recursive: true });
+
+      if (payload.local_source) {
+        fs.copyFileSync(payload.local_source, targetPath);
+        const stat = fs.statSync(targetPath);
+        await this.toolResponse({ id: reqId, success: true, result: { size: stat.size } });
+        return;
+      }
+
+      if (!payload.url) {
+        await this.toolResponse({ id: reqId, success: false, error: "neither url nor local_source provided" });
+        return;
+      }
+      const res = await fetch(payload.url);
+      if (!res.ok) {
+        await this.toolResponse({ id: reqId, success: false, error: `download failed: ${res.status}` });
+        return;
+      }
+      const buffer = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(targetPath, buffer);
+      await this.toolResponse({ id: reqId, success: true, result: { size: buffer.length } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[endpoint] file_push error:", msg);
+      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
+    }
+  }
+
+  private async handleFsProbe(reqId: string, payload: FsProbeRequest): Promise<void> {
+    try {
+      if (fs.existsSync(payload.path)) {
+        const content = fs.readFileSync(payload.path, "utf-8");
+        await this.toolResponse({ id: reqId, success: true, result: { found: true, content } });
+      } else {
+        await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } }).catch(() => {});
+      console.error("[endpoint] fs_probe error:", msg);
+    }
+  }
+
+  private writeFsProbeFile(): FsProbeMarker | null {
+    try {
+      const nonce = crypto.randomUUID();
+      const probePath = path.join(os.tmpdir(), `ailo-ep-${this.cfg.endpointId}.probe`);
+      fs.writeFileSync(probePath, nonce, "utf-8");
+      return { path: probePath, nonce };
+    } catch (err) {
+      console.error("[endpoint] failed to write fs probe file:", err);
+      return null;
     }
   }
 

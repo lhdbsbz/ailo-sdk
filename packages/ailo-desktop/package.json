@@ -15,11 +15,16 @@
   "dependencies": {
     "@lmcl/ailo-endpoint-sdk": "*",
     "glob": "^11.0.0",
+    "imapflow": "^1.2.10",
+    "mailparser": "^3.6.6",
+    "nodemailer": "^8.0.1",
     "playwright": "^1.50.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.5",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.17",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }

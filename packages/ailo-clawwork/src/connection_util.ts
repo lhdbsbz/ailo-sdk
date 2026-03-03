@@ -21,6 +21,5 @@ export function loadConnectionConfig(configPath: string): AiloConnectionConfig {
     url: (ailo?.wsUrl as string) ?? "",
     apiKey: (ailo?.apiKey as string) ?? "",
     endpointId: (ailo?.endpointId as string) ?? "",
-    displayName: (ailo?.displayName as string) ?? undefined,
   };
 }

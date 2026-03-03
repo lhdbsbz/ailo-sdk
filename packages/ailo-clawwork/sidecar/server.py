@@ -183,6 +183,9 @@ def submit_work(req: SubmitRequest):
     if "max_payment" not in task and req.task_id in task_mgr.task_values:
         task["max_payment"] = task_mgr.task_values[req.task_id]
 
+    FIXED_TASK_COST = 0.5
+    tracker.track_tokens(input_tokens=0, output_tokens=0, cost=FIXED_TASK_COST)
+
     all_paths: list[str] = []
 
     if req.work_summary:

@@ -1,7 +1,7 @@
 ---
-name: discord-channel
+name: discord
 version: 1.0.0
-description: Discord 通道，连接 Discord 服务器频道和私聊
+description: Discord 端点，连接 Discord 服务器频道和私聊
 tools:
   - name: send
     timeout: 10
@@ -17,7 +17,7 @@ tools:
 
 ## 端点说明
 
-Discord 通道，通过 Discord.js Gateway 接收消息，通过 REST API 回复。支持 Server 频道和 DM 私聊。
+Discord 端点，通过 Discord.js Gateway 接收消息，通过 REST API 回复。支持 Server 频道和 DM 私聊。
 
 `chat_id` 格式：
 - 频道消息：`ch:` 前缀 + channel_id（如 `ch:123456789`）

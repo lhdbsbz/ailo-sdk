@@ -1,7 +1,7 @@
 ---
-name: dingtalk-channel
+name: dingtalk
 version: 1.0.0
-description: 钉钉即时通讯通道，连接企业内所有钉钉用户和群组
+description: 钉钉即时通讯端点，连接企业内所有钉钉用户和群组
 tools:
   - name: send
     timeout: 10
@@ -17,7 +17,7 @@ tools:
 
 ## 端点说明
 
-钉钉即时通讯通道，通过 Stream 模式接收企业内钉钉用户的消息，通过 sessionWebhook 回复。
+钉钉即时通讯端点，通过 Stream 模式接收企业内钉钉用户的消息，通过 sessionWebhook 回复。
 
 `chat_id` 格式：
 - 群聊：`grp:` 前缀 + conversationId 后16位（如 `grp:abc123def456`）

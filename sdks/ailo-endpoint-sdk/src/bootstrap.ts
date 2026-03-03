@@ -8,7 +8,6 @@
  * ```ts
  * runEndpoint({
  *   handler: new MyHandler(),
- *   displayName: "My Endpoint",
  *   caps: ["message", "tool_execute"],
  * });
  * ```
@@ -57,8 +56,6 @@ export interface EndpointHandler {
 }
 
 export interface EndpointConfig {
-  /** Display name shown in Ailo admin */
-  displayName: string;
   /** Capability list (default: ["message","tool_execute"]) */
   caps?: string[];
   /** The endpoint handler (feishu, webchat, etc.) */
@@ -119,7 +116,6 @@ export function runEndpoint(config: EndpointConfig): void {
     url: ailoWsUrl,
     apiKey: ailoApiKey,
     endpointId,
-    displayName: config.displayName,
     caps,
     tools: config.tools,
     instructions: config.instructions,

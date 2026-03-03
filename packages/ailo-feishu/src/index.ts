@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Ailo 飞书 Channel — 自带配置界面：打开网页填写飞书应用 + Ailo 连接信息，保存后生效。
+ * Ailo 飞书端点 — 自带配置界面：打开网页填写飞书应用 + Ailo 连接信息，保存后生效。
  * 先起配置服务，有完整配置则连接；保存后重连或首次连接。
  */
 
 import {
   runEndpoint,
-  startChannelConfigServer,
+  startEndpointConfigServer,
   readConfig,
   mergeWithEnv,
   hasValidConfig,
@@ -24,10 +24,10 @@ const CONFIG_PORT = Number(process.env.CONFIG_PORT) || 19802;
 const configPath = join(process.cwd(), "config.json");
 const BLUEPRINT_FEISHU_URL =
   process.env.BLUEPRINT_FEISHU_URL ??
-  "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/feishu-channel.blueprint.md";
+  "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/feishu.blueprint.md";
 
 interface FeishuConfig {
-  ailo: { wsUrl: string; apiKey: string; endpointId: string; displayName?: string };
+  ailo: { wsUrl: string; apiKey: string; endpointId: string };
   feishu: { appId: string; appSecret: string };
 }
 
@@ -48,7 +48,6 @@ function getAiloConnection(cfg: FeishuConfig): AiloConnectionConfig {
     url: cfg.ailo?.wsUrl ?? "",
     apiKey: cfg.ailo?.apiKey ?? "",
     endpointId: cfg.ailo?.endpointId ?? "",
-    displayName: cfg.ailo?.displayName,
   };
 }
 
@@ -59,7 +58,6 @@ function hasValidFeishuConfig(cfg: FeishuConfig): boolean {
 const connectionState = {
   connected: false,
   endpointId: "",
-  displayName: "飞书",
 };
 
 let endpointCtxRef: EndpointContext | null = null;
@@ -88,7 +86,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
         endpointCtxRef = ctx;
         connectionState.connected = true;
         connectionState.endpointId = ailo.endpointId;
-        connectionState.displayName = ailo.displayName ?? "飞书";
         await handler.start(ctx);
         console.log("[feishu] 飞书端点已启动");
       },
@@ -98,7 +95,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
         endpointCtxRef = null;
         connectionState.connected = false;
         connectionState.endpointId = "";
-        connectionState.displayName = "飞书";
         await handler.stop();
         console.log("[feishu] 飞书端点已停止");
       },
@@ -107,7 +103,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
     currentStop = () => wrapper.stop();
     runEndpoint({
       handler: wrapper,
-      displayName: ailo.displayName ?? "飞书",
       caps: ["message", "tool_execute"],
       ailoWsUrl: ailo.url,
       ailoApiKey: ailo.apiKey,
@@ -144,7 +139,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
           url: latest.url,
           apiKey: latest.apiKey,
           endpointId: latest.endpointId,
-          displayName: latest.displayName,
         });
       },
     });
@@ -155,8 +149,8 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
 }
 
 async function main(): Promise<void> {
-  startChannelConfigServer({
-    channelName: "飞书",
+  startEndpointConfigServer({
+    endpointName: "飞书",
     defaultPort: CONFIG_PORT,
     configPath,
     platformFields: [
@@ -170,7 +164,6 @@ async function main(): Promise<void> {
         url: (config as any).ailo?.wsUrl ?? "",
         apiKey: (config as any).ailo?.apiKey ?? "",
         endpointId: (config as any).ailo?.endpointId ?? "",
-        displayName: (config as any).ailo?.displayName,
       };
       if (endpointCtxRef && currentStop) {
         endpointCtxRef.client.close();

@@ -1,7 +1,7 @@
 ---
-name: qq-channel
+name: qq
 version: 1.0.0
-description: QQ 频道/群组/私聊通道，连接 QQ Bot 的所有消息入口
+description: QQ 频道/群组/私聊端点，连接 QQ Bot 的所有消息入口
 tools:
   - name: send
     timeout: 10
@@ -18,7 +18,7 @@ tools:
 
 ## 端点说明
 
-QQ Bot 通道，通过 WebSocket Gateway 接收消息，通过 REST API 回复。支持频道、群组和 C2C 私聊三种场景。
+QQ Bot 端点，通过 WebSocket Gateway 接收消息，通过 REST API 回复。支持频道、群组和 C2C 私聊三种场景。
 
 `chat_id` 格式：
 - 频道消息：`ch:` 前缀 + channel_id（如 `ch:123456`）

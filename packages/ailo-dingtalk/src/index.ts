@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
   runEndpoint,
-  startChannelConfigServer,
+  startEndpointConfigServer,
   readConfig,
   mergeWithEnv,
   hasValidConfig,
@@ -19,10 +19,10 @@ const CONFIG_PORT = Number(process.env.CONFIG_PORT) || 19805;
 const configPath = join(process.cwd(), "config.json");
 const BLUEPRINT_URL =
   process.env.BLUEPRINT_DINGTALK_URL ??
-  "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/dingtalk-channel.blueprint.md";
+  "https://raw.githubusercontent.com/lhdbsbz/ailo-sdk/master/blueprints/dingtalk.blueprint.md";
 
 interface DingtalkConfig {
-  ailo: { wsUrl: string; apiKey: string; endpointId: string; displayName?: string };
+  ailo: { wsUrl: string; apiKey: string; endpointId: string };
   dingtalk: { clientId: string; clientSecret: string };
 }
 
@@ -38,10 +38,10 @@ function loadConfig(): DingtalkConfig {
 }
 
 function getAiloConnection(cfg: DingtalkConfig): AiloConnectionConfig {
-  return { url: cfg.ailo?.wsUrl ?? "", apiKey: cfg.ailo?.apiKey ?? "", endpointId: cfg.ailo?.endpointId ?? "", displayName: cfg.ailo?.displayName };
+  return { url: cfg.ailo?.wsUrl ?? "", apiKey: cfg.ailo?.apiKey ?? "", endpointId: cfg.ailo?.endpointId ?? "" };
 }
 
-const connectionState = { connected: false, endpointId: "", displayName: "钉钉" };
+const connectionState = { connected: false, endpointId: "" };
 let endpointCtxRef: EndpointContext | null = null;
 let connectAttempt = 0;
 let connectionPending = false;
@@ -65,7 +65,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
       start: async (ctx: EndpointContext) => {
         connectionPending = false; endpointCtxRef = ctx;
         connectionState.connected = true; connectionState.endpointId = ailo.endpointId;
-        connectionState.displayName = ailo.displayName ?? "钉钉";
         await handler.start(ctx);
         console.log("[dingtalk] 钉钉端点已启动");
       },
@@ -80,7 +79,6 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
     currentStop = () => wrapper.stop();
     runEndpoint({
       handler: wrapper,
-      displayName: ailo.displayName ?? "钉钉",
       caps: ["message", "tool_execute"],
       ailoWsUrl: ailo.url, ailoApiKey: ailo.apiKey, endpointId: ailo.endpointId,
       blueprints: [BLUEPRINT_URL],
@@ -96,15 +94,15 @@ async function applyConnection(overrides?: AiloConnectionConfig): Promise<void> 
         const delay = backoffDelayMs(connectAttempt++);
         console.error(`[dingtalk] 连接失败，${(delay / 1000).toFixed(1)}s 后重试 (${err.message})`);
         await new Promise((r) => setTimeout(r, delay));
-        await client.reconnect(undefined, { url: latest.url, apiKey: latest.apiKey, endpointId: latest.endpointId, displayName: latest.displayName });
+        await client.reconnect(undefined, { url: latest.url, apiKey: latest.apiKey, endpointId: latest.endpointId });
       },
     });
   } catch (e) { connectionPending = false; throw e; }
 }
 
 async function main(): Promise<void> {
-  startChannelConfigServer({
-    channelName: "钉钉",
+  startEndpointConfigServer({
+    endpointName: "钉钉",
     defaultPort: CONFIG_PORT,
     configPath,
     platformFields: [
@@ -114,7 +112,7 @@ async function main(): Promise<void> {
     envMapping: ENV_MAPPING,
     getConnectionStatus: () => connectionState,
     onConfigSaved: async (config) => {
-      const ailo: AiloConnectionConfig = { url: (config as any).ailo?.wsUrl ?? "", apiKey: (config as any).ailo?.apiKey ?? "", endpointId: (config as any).ailo?.endpointId ?? "", displayName: (config as any).ailo?.displayName };
+      const ailo: AiloConnectionConfig = { url: (config as any).ailo?.wsUrl ?? "", apiKey: (config as any).ailo?.apiKey ?? "", endpointId: (config as any).ailo?.endpointId ?? "" };
       if (endpointCtxRef && currentStop) { endpointCtxRef.client.close(); await currentStop(); await applyConnection(ailo); }
       else if (endpointCtxRef) { await endpointCtxRef.client.reconnect(undefined, ailo); }
       else if (!connectionPending) { await applyConnection(ailo); }

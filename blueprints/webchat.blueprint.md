@@ -1,7 +1,7 @@
 ---
-name: webchat-channel
+name: webchat
 version: 1.0.0
-description: 网页聊天通道
+description: 网页聊天端点
 tools:
   - name: send
     timeout: 10
@@ -16,7 +16,7 @@ tools:
 
 ## 端点说明
 
-网页聊天通道，提供基于浏览器的实时聊天界面。用户通过网页端发送消息，系统接收后进行处理并返回响应。
+网页聊天端点，提供基于浏览器的实时聊天界面。用户通过网页端发送消息，系统接收后进行处理并返回响应。
 
 每个使用者名称对应一个独立的 `chat_id`（使用 `participantName` 作为路由键）。
 

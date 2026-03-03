@@ -35,6 +35,14 @@ export type {
   MediaPushPayload,
   FileFetchRequest,
   FileFetchResponse,
+  DirListRequest,
+  DirListEntry,
+  DirListResponse,
+  FilePushRequest,
+  FilePushResponse,
+  FsProbeMarker,
+  FsProbeRequest,
+  FsProbeResponse,
   EndpointStorage,
   HealthStatus,
   Point2D,
@@ -62,5 +70,5 @@ export {
 } from "./connection-util.js";
 export type { AiloConnectionConfig } from "./connection-util.js";
 
-export { startChannelConfigServer } from "./channel-config.js";
-export type { ConfigField, ChannelConfigServerOptions } from "./channel-config.js";
+export { startEndpointConfigServer } from "./endpoint-config.js";
+export type { ConfigField, EndpointConfigServerOptions } from "./endpoint-config.js";

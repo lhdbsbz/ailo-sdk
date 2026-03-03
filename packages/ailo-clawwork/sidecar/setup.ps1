@@ -69,21 +69,56 @@ $metaCount = (Get-ChildItem -Path $metaPrompts -Filter "*.json" -ErrorAction Sil
 Write-Host "[OK] Found $metaCount evaluation meta-prompts" -ForegroundColor Green
 
 # ── 4. LibreOffice (PPTX/DOCX evaluation needs it) ──
-$hasSoffice = Get-Command soffice -ErrorAction SilentlyContinue
-if ($hasSoffice) {
-    Write-Host "[OK] LibreOffice already installed" -ForegroundColor Green
-} else {
+$loPath = "C:\Program Files\LibreOffice\program"
+$loInstalled = Test-Path "$loPath\soffice.exe"
+if (-not $loInstalled) {
     Write-Host "[..] Installing LibreOffice via winget..." -ForegroundColor Yellow
     winget install TheDocumentFoundation.LibreOffice --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] LibreOffice installed" -ForegroundColor Green
-        Write-Host "     NOTE: You may need to restart your terminal for 'soffice' to be on PATH" -ForegroundColor Yellow
+    $loInstalled = Test-Path "$loPath\soffice.exe"
+}
+if ($loInstalled) {
+    Write-Host "[OK] LibreOffice installed at: $loPath" -ForegroundColor Green
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$loPath*") {
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$loPath", "User")
+        $env:Path = "$env:Path;$loPath"
+        Write-Host "     Added LibreOffice to PATH" -ForegroundColor Green
+    }
+} else {
+    Write-Host "[WARN] LibreOffice not found. Please install manually: https://www.libreoffice.org/download" -ForegroundColor Yellow
+}
+
+# ── 5. Poppler (PDF to image conversion) ──
+$popplerBin = Get-ChildItem -Path "C:\tools\poppler" -Recurse -Filter "pdftoppm.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($popplerBin) {
+    Write-Host "[OK] Poppler already installed at: $($popplerBin.DirectoryName)" -ForegroundColor Green
+} else {
+    Write-Host "[..] Downloading Poppler for Windows..." -ForegroundColor Yellow
+    $popplerDir = "C:\tools\poppler"
+    New-Item -ItemType Directory -Force -Path $popplerDir | Out-Null
+    $popplerUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.08.0-0/Release-24.08.0-0.zip"
+    $popplerZip = "$env:TEMP\poppler-win.zip"
+    Invoke-WebRequest -Uri $popplerUrl -OutFile $popplerZip -UseBasicParsing
+    Expand-Archive -Path $popplerZip -DestinationPath $popplerDir -Force
+    Remove-Item $popplerZip -Force
+    $popplerBin = Get-ChildItem -Path $popplerDir -Recurse -Filter "pdftoppm.exe" | Select-Object -First 1
+    if ($popplerBin) {
+        Write-Host "[OK] Poppler installed" -ForegroundColor Green
     } else {
-        Write-Host "[WARN] winget install failed. Please install manually: https://www.libreoffice.org/download" -ForegroundColor Yellow
+        Write-Host "[WARN] Poppler extraction failed. Download manually from: https://github.com/oschwartz10612/poppler-windows/releases" -ForegroundColor Yellow
+    }
+}
+if ($popplerBin) {
+    $binPath = $popplerBin.DirectoryName
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$binPath*") {
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$binPath", "User")
+        $env:Path = "$env:Path;$binPath"
+        Write-Host "     Added Poppler to PATH" -ForegroundColor Green
     }
 }
 
-# ── 5. Python venv ──
+# ── 6. Python venv ──
 $VENV = Join-Path $SIDECAR_DIR ".venv"
 if (Test-Path (Join-Path $VENV "Scripts/python.exe")) {
     Write-Host "[OK] Python venv already exists" -ForegroundColor Green
