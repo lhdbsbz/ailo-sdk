@@ -12,7 +12,6 @@ packages/
   ailo-feishu/             Lark/Feishu endpoint (WS receive + Open API send)
   ailo-dingtalk/           DingTalk endpoint (Stream mode + sessionWebhook)
   ailo-qq/                 QQ endpoint (Bot WS Gateway + REST API)
-  ailo-discord/            Discord endpoint (Discord.js Gateway + REST API)
   ailo-desktop/            Desktop agent (filesystem, shell, screenshot, browser, email, MCP)
 
 blueprints/                Blueprint files for each endpoint (tool definitions + usage docs)
@@ -45,10 +44,6 @@ cd packages/ailo-feishu && npm start
 # DingTalk
 cd packages/ailo-dingtalk && npm start
 # Open http://127.0.0.1:19805 to configure
-
-# Discord
-cd packages/ailo-discord && npm start
-# Open http://127.0.0.1:19804 to configure
 
 # QQ
 cd packages/ailo-qq && npm start
