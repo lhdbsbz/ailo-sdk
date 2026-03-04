@@ -188,17 +188,19 @@ export class EmailHandler {
   // ── Checkpoint 持久化 ──
 
   private async saveCheckpoint(): Promise<void> {
+    if (!this.ctx) return;
     const cp: Checkpoint = { lastUid: this.lastUid, uidValidity: this.uidValidity };
     try {
-      await this.ctx!.storage.setData("email_checkpoint", JSON.stringify(cp));
+      await this.ctx.storage.setData("email_checkpoint", JSON.stringify(cp));
     } catch (err) {
       console.error("[email] save checkpoint failed:", (err as Error).message);
     }
   }
 
   private async restoreCheckpoint(): Promise<void> {
+    if (!this.ctx) return;
     try {
-      const raw = await this.ctx!.storage.getData("email_checkpoint");
+      const raw = await this.ctx.storage.getData("email_checkpoint");
       if (!raw) return;
       const cp = JSON.parse(raw) as Partial<Checkpoint>;
       this.lastUid = cp.lastUid ?? 0;
@@ -221,6 +223,7 @@ export class EmailHandler {
     const attachments = await this.saveAttachments(parsed);
 
     const contextTags: ContextTag[] = [
+      { kind: "channel", value: "邮件", groupWith: true },
       { kind: "conv_type", value: "私聊", groupWith: true },
       { kind: "chat_id", value: fromAddr, groupWith: true, passToTool: true },
       { kind: "participant", value: fromName, groupWith: false },

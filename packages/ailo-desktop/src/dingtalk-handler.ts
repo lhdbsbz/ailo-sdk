@@ -90,6 +90,7 @@ export class DingTalkHandler implements EndpointHandler {
     const isPrivate = chatType === "私聊";
 
     const tags: ContextTag[] = [
+      { kind: "channel", value: "钉钉", groupWith: true },
       { kind: "conv_type", value: chatType, groupWith: false },
       { kind: "chat_id", value: chatId, groupWith: true, passToTool: true },
     ];
@@ -206,6 +207,12 @@ export class DingTalkHandler implements EndpointHandler {
   }
 
   async stop(): Promise<void> {
+    if (this.client) {
+      try {
+        if (typeof this.client.disconnect === "function") this.client.disconnect();
+      } catch { /* best-effort */ }
+      this.client = null;
+    }
     this.ctx = null;
   }
 }

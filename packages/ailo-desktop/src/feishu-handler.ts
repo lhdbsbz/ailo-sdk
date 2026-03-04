@@ -47,6 +47,7 @@ export class FeishuHandler implements EndpointHandler {
   private externalUserLabels = new Map<string, string>();
   /** 串行化外部用户持久化，避免并发 getData→parse→setData 导致互相覆盖、数据丢失 */
   private externalUserSaveQueue: Promise<void> = Promise.resolve();
+  private cacheCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   // 缓存过期时间：24小时
   private readonly CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -177,6 +178,7 @@ export class FeishuHandler implements EndpointHandler {
     const isPrivate = chatType === "私聊";
 
     const tags: ContextTag[] = [
+      { kind: "channel", value: "飞书", groupWith: true },
       { kind: "conv_type", value: chatType, groupWith: false },
       { kind: "chat_id", value: chatId, groupWith: true, passToTool: true },
     ];
@@ -400,7 +402,8 @@ export class FeishuHandler implements EndpointHandler {
       encryptKey: undefined,
     });
 
-    const cacheCleanupInterval = setInterval(() => this.cleanExpiredCache(), 60 * 60 * 1000);
+    if (this.cacheCleanupTimer) clearInterval(this.cacheCleanupTimer);
+    this.cacheCleanupTimer = setInterval(() => this.cleanExpiredCache(), 60 * 60 * 1000);
 
     const wsClientAny = wsClient as unknown as { eventDispatcher: unknown; reConnect(isStart?: boolean): Promise<void> };
     wsClientAny.eventDispatcher = eventDispatcher;
@@ -419,9 +422,10 @@ export class FeishuHandler implements EndpointHandler {
         const senderId =
           event.sender?.sender_id?.open_id ?? event.sender?.sender_id?.user_id ?? "";
         const messageType = msg.message_type ?? "";
-        const timestamp = msg.create_time ? parseInt(msg.create_time, 10) : Date.now();
+        let createTimeMs = msg.create_time ? parseInt(msg.create_time, 10) : NaN;
+        if (!isNaN(createTimeMs) && createTimeMs < 1e12) createTimeMs *= 1000;
+        const timestamp = !isNaN(createTimeMs) ? createTimeMs : Date.now();
 
-        const createTimeMs = msg.create_time ? parseInt(msg.create_time, 10) : NaN;
         if (!isNaN(createTimeMs) && Date.now() - createTimeMs > STALE_MESSAGE_THRESHOLD_MS) {
           this._log("info", `dropped stale message ${messageId}`, {
             create_time: createTimeMs,
@@ -716,6 +720,17 @@ export class FeishuHandler implements EndpointHandler {
   }
 
   async stop(): Promise<void> {
+    if (this.cacheCleanupTimer) {
+      clearInterval(this.cacheCleanupTimer);
+      this.cacheCleanupTimer = null;
+    }
+    if (this.wsClient) {
+      try {
+        const wsAny = this.wsClient as unknown as { ws?: { close?: () => void }; _closed?: boolean };
+        if (wsAny.ws?.close) wsAny.ws.close();
+      } catch { /* best-effort */ }
+      this.wsClient = null;
+    }
     this.ctx = null;
   }
 }

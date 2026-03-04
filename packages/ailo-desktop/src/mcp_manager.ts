@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { readFile, writeFile, mkdir, stat } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import type { ToolCapability } from "@lmcl/ailo-endpoint-sdk";
 
 type Args = Record<string, unknown>;
@@ -194,7 +194,9 @@ export class LocalMCPManager {
 
   private async startStdioServer(name: string, config: MCPServerConfig): Promise<void> {
     const env = { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", ...(config.env ?? {}) };
-    const proc = spawn(config.command!, config.args ?? [], {
+    const args = config.args ?? [];
+    const shellCmd = [config.command!, ...args].map(shellEscape).join(" ");
+    const proc = spawn(shellCmd, [], {
       stdio: ["pipe", "pipe", "pipe"],
       env,
       shell: true,
@@ -508,30 +510,36 @@ export class LocalMCPManager {
     const name = args.name as string;
     if (!name) throw new Error("name 必填");
     const transport = (args.transport as string) ?? "stdio";
+    let config: MCPServerConfig;
     if (transport === "sse") {
       const url = args.url as string;
       if (!url) throw new Error("SSE 模式下 url 必填");
-      const config: MCPServerConfig = {
+      config = {
         transport: "sse",
         url,
         env: args.env as Record<string, string>,
         enabled: true,
       };
-      this.configs.set(name, config);
-      await this.saveConfig();
-      return { text: `已创建 MCP 服务 ${name} (SSE)`, toolsChanged: false };
+    } else {
+      config = {
+        transport: "stdio",
+        command: args.command as string ?? "",
+        args: args.args as string[],
+        env: args.env as Record<string, string>,
+        enabled: true,
+      };
+      if (!config.command) throw new Error("command 必填");
     }
-    const config: MCPServerConfig = {
-      transport: "stdio",
-      command: args.command as string ?? "",
-      args: args.args as string[],
-      env: args.env as Record<string, string>,
-      enabled: true,
-    };
-    if (!config.command) throw new Error("command 必填");
     this.configs.set(name, config);
     await this.saveConfig();
-    return { text: `已创建 MCP 服务 ${name}`, toolsChanged: false };
+    try {
+      await this.startServer(name, config);
+      const session = this.sessions.get(name);
+      const toolCount = session?.tools.length ?? 0;
+      return { text: `已创建并启动 MCP 服务 ${name}，发现 ${toolCount} 个工具`, toolsChanged: true };
+    } catch (e: any) {
+      return { text: `已创建 MCP 服务 ${name}，但启动失败: ${e.message}`, toolsChanged: false };
+    }
   }
 
   private async doDelete(args: Args): Promise<{ text: string; toolsChanged: boolean }> {
@@ -574,4 +582,13 @@ export class LocalMCPManager {
   getConfigs(): Map<string, MCPServerConfig> { return this.configs; }
   isRunning(name: string): boolean { return this.sessions.has(name); }
   getToolsForServer(name: string): ToolCapability[] { return this.sessions.get(name)?.tools ?? []; }
+}
+
+function shellEscape(arg: string): string {
+  if (platform() === "win32") {
+    if (!/[ "&|<>^%!]/.test(arg)) return arg;
+    return `"${arg.replace(/"/g, '""')}"`;
+  }
+  if (!/[^a-zA-Z0-9_./:=@-]/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, "'\\''")}'`;
 }

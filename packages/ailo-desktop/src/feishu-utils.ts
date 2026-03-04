@@ -32,9 +32,18 @@ export function extractTextFromPostContent(contentJson: string): string {
   const parts: string[] = [];
   for (const row of content) {
     if (!Array.isArray(row)) continue;
+    const rowParts: string[] = [];
     for (const node of row) {
-      if (node?.tag === "text" && typeof node.text === "string") parts.push(node.text);
+      if (node?.tag === "text" && typeof node.text === "string") {
+        rowParts.push(node.text);
+      } else if (node?.tag === "at" && typeof node.user_id === "string") {
+        const name = typeof node.user_name === "string" ? node.user_name : "";
+        rowParts.push(name ? `@${name}` : `@${node.user_id}`);
+      } else if (node?.tag === "a" && typeof node.text === "string") {
+        rowParts.push(node.text);
+      }
     }
+    if (rowParts.length > 0) parts.push(rowParts.join(""));
   }
   return parts.join("\n");
 }

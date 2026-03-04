@@ -544,6 +544,7 @@ async function main(): Promise<void> {
     },
     onEmailConfigSaved: async () => {
       if (!endpointCtx) return;
+      const wasRunning = !!emailHandler;
       if (emailHandler) {
         await emailHandler.stop();
         emailHandler = null;
@@ -552,6 +553,11 @@ async function main(): Promise<void> {
       if (emailCfg) {
         emailHandler = new EmailHandler(emailCfg);
         await emailHandler.start(endpointCtx);
+        if (!wasRunning) {
+          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_EMAIL] } });
+        }
+      } else if (wasRunning) {
+        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_EMAIL] } });
       }
     },
     getEmailStatus: () => ({
@@ -560,6 +566,7 @@ async function main(): Promise<void> {
     }),
     onFeishuConfigSaved: async () => {
       if (!endpointCtx) return;
+      const wasRunning = !!feishuHandler;
       if (feishuHandler) {
         await feishuHandler.stop();
         feishuHandler = null;
@@ -568,6 +575,11 @@ async function main(): Promise<void> {
       if (feishuCfg) {
         feishuHandler = new FeishuHandler(feishuCfg);
         await feishuHandler.start(endpointCtx);
+        if (!wasRunning) {
+          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_FEISHU] } });
+        }
+      } else if (wasRunning) {
+        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_FEISHU] } });
       }
     },
     getFeishuStatus: () => ({
@@ -576,6 +588,7 @@ async function main(): Promise<void> {
     }),
     onDingtalkConfigSaved: async () => {
       if (!endpointCtx) return;
+      const wasRunning = !!dingtalkHandler;
       if (dingtalkHandler) {
         await dingtalkHandler.stop();
         dingtalkHandler = null;
@@ -584,6 +597,11 @@ async function main(): Promise<void> {
       if (dingtalkCfg) {
         dingtalkHandler = new DingTalkHandler(dingtalkCfg);
         await dingtalkHandler.start(endpointCtx);
+        if (!wasRunning) {
+          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_DINGTALK] } });
+        }
+      } else if (wasRunning) {
+        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_DINGTALK] } });
       }
     },
     getDingtalkStatus: () => ({
@@ -592,6 +610,7 @@ async function main(): Promise<void> {
     }),
     onQQConfigSaved: async () => {
       if (!endpointCtx) return;
+      const wasRunning = !!qqHandler;
       if (qqHandler) {
         await qqHandler.stop();
         qqHandler = null;
@@ -600,6 +619,11 @@ async function main(): Promise<void> {
       if (qqCfg) {
         qqHandler = new QQHandler(qqCfg);
         await qqHandler.start(endpointCtx);
+        if (!wasRunning) {
+          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_QQ] } });
+        }
+      } else if (wasRunning) {
+        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_QQ] } });
       }
     },
     getQQStatus: () => ({

@@ -13,6 +13,7 @@ export type { QQConfig } from "./qq-types.js";
 export class QQHandler implements EndpointHandler {
   private ctx: EndpointContext | null = null;
   private gateway: QQGatewayClient | null = null;
+  private lastMsgIdByChatId = new Map<string, string>();
 
   constructor(private config: QQConfig) {}
 
@@ -45,6 +46,7 @@ export class QQHandler implements EndpointHandler {
     const { chatId, text, chatType, senderId, senderName, msgId } = opts;
 
     const tags: ContextTag[] = [
+      { kind: "channel", value: "QQ", groupWith: true },
       { kind: "conv_type", value: chatType, groupWith: false },
       { kind: "chat_id", value: chatId, groupWith: true, passToTool: true },
     ];
@@ -86,8 +88,10 @@ export class QQHandler implements EndpointHandler {
   private handleDispatch(event: string, data: any): void {
     switch (event) {
       case "AT_MESSAGE_CREATE":
-      case "PUBLIC_MESSAGES_DELETE":
         this.handleGuildMessage(data as QQMessageEvent);
+        break;
+      case "PUBLIC_MESSAGES_DELETE":
+        this._log("debug", "ignored message delete event");
         break;
       case "DIRECT_MESSAGE_CREATE":
         this.handleDirectMessage(data as QQMessageEvent);
@@ -109,6 +113,7 @@ export class QQHandler implements EndpointHandler {
     if (!text) return;
 
     const chatId = `ch:${msg.channel_id}`;
+    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
     this.acceptMessage(
       this.buildAcceptMessage({
         chatId,
@@ -127,6 +132,7 @@ export class QQHandler implements EndpointHandler {
     if (!text) return;
 
     const chatId = `dm:${msg.guild_id}`;
+    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
     this.acceptMessage(
       this.buildAcceptMessage({
         chatId,
@@ -145,6 +151,7 @@ export class QQHandler implements EndpointHandler {
 
     const userId = msg.author?.user_openid ?? msg.author?.id ?? "";
     const chatId = `c2c:${userId}`;
+    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
     this.acceptMessage(
       this.buildAcceptMessage({
         chatId,
@@ -163,6 +170,7 @@ export class QQHandler implements EndpointHandler {
     if (!text) return;
 
     const chatId = `grp:${msg.group_openid ?? msg.group_id}`;
+    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
     this.acceptMessage(
       this.buildAcceptMessage({
         chatId,
@@ -185,25 +193,27 @@ export class QQHandler implements EndpointHandler {
     const [kind, id] = chatId.split(":", 2);
     if (!kind || !id) throw new Error(`无效的 chat_id 格式: ${chatId}`);
 
+    const resolvedMsgId = msgId || this.lastMsgIdByChatId.get(chatId);
+
     let url: string;
     let body: Record<string, unknown>;
 
     switch (kind) {
       case "ch":
         url = `${this.apiBase}/channels/${id}/messages`;
-        body = { content: text, msg_id: msgId || undefined };
+        body = { content: text, msg_id: resolvedMsgId || undefined };
         break;
       case "dm":
         url = `${this.apiBase}/dms/${id}/messages`;
-        body = { content: text, msg_id: msgId || undefined };
+        body = { content: text, msg_id: resolvedMsgId || undefined };
         break;
       case "c2c":
         url = `${this.apiBase}/v2/users/${id}/messages`;
-        body = { content: text, msg_type: 0, msg_id: msgId || undefined };
+        body = { content: text, msg_type: 0, msg_id: resolvedMsgId || undefined };
         break;
       case "grp":
         url = `${this.apiBase}/v2/groups/${id}/messages`;
-        body = { content: text, msg_type: 0, msg_id: msgId || undefined };
+        body = { content: text, msg_type: 0, msg_id: resolvedMsgId || undefined };
         break;
       default:
         throw new Error(`不支持的 chat_id 类型: ${kind}`);

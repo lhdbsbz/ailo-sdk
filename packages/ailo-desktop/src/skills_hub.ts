@@ -3,7 +3,6 @@
  * Downloads SKILL.md + references/ + scripts/ bundles from any supported marketplace URL.
  */
 
-import { get as httpsGet } from "https";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { readConfig } from "@lmcl/ailo-endpoint-sdk";
@@ -186,31 +185,15 @@ function httpJson(url: string): Promise<unknown> {
   return httpText(url).then((t) => JSON.parse(t));
 }
 
-function httpText(url: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { "User-Agent": "ailo-desktop/1.0" };
+async function httpText(url: string): Promise<string> {
+  const headers: Record<string, string> = { "User-Agent": "ailo-desktop/1.0" };
+  try {
     const cfg = readConfig(join(process.cwd(), "config.json")) as Record<string, unknown>;
     const ghToken = (cfg.githubToken as string) || "";
     if (ghToken && url.includes("api.github.com")) headers.Authorization = `token ${ghToken}`;
+  } catch { /* config not available, proceed without token */ }
 
-    const doReq = (reqUrl: string, redirects = 0) => {
-      if (redirects > 5) { reject(new Error("Too many redirects")); return; }
-      const mod = reqUrl.startsWith("https") ? require("https") : require("http");
-      mod.get(reqUrl, { headers }, (res: any) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          doReq(res.headers.location, redirects + 1);
-          return;
-        }
-        if (res.statusCode !== 200) {
-          res.resume();
-          reject(new Error(`HTTP ${res.statusCode} for ${reqUrl}`));
-          return;
-        }
-        const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-      }).on("error", reject);
-    };
-    doReq(url);
-  });
+  const res = await fetch(url, { headers, redirect: "follow" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.text();
 }

@@ -1,7 +1,7 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { writeFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
+import { tmpdir, platform } from "os";
 import type { EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 
 const MAX_OUTPUT = 50000;
@@ -23,7 +23,7 @@ export async function executeCode(ctx: EndpointContext, args: Record<string, unk
   const dir = await mkdtemp(join(tmpdir(), "ailo-code-"));
   const ext = language === "python" ? "py" : "mjs";
   const file = join(dir, `script.${ext}`);
-  const cmd = language === "python" ? "python3" : "node";
+  const cmd = language === "python" ? resolvePythonCmd() : "node";
 
   await writeFile(file, code, "utf-8");
 
@@ -33,7 +33,7 @@ export async function executeCode(ctx: EndpointContext, args: Record<string, unk
     PYTHONUTF8: "1",
   };
 
-  const proc = spawn(cmd, [file], { stdio: ["pipe", "pipe", "pipe"], shell: true, env });
+  const proc = spawn(cmd, [file], { stdio: ["pipe", "pipe", "pipe"], env });
 
   const output: string[] = [];
   proc.stdout?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
@@ -60,4 +60,22 @@ export async function executeCode(ctx: EndpointContext, args: Record<string, unk
   });
 
   return `已启动 ${language} 代码执行`;
+}
+
+let _pythonCmd: string | null = null;
+
+function resolvePythonCmd(): string {
+  if (_pythonCmd) return _pythonCmd;
+  const candidates = platform() === "win32"
+    ? ["python", "python3", "py"]
+    : ["python3", "python"];
+  for (const cmd of candidates) {
+    const r = spawnSync(cmd, ["--version"], { encoding: "utf-8", timeout: 5000 });
+    if (r.status === 0) {
+      _pythonCmd = cmd;
+      return cmd;
+    }
+  }
+  _pythonCmd = candidates[0];
+  return _pythonCmd;
 }

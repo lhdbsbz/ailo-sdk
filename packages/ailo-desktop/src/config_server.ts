@@ -175,6 +175,7 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     }
     bindClient(routeName, ws);
     const tags: ContextTag[] = [
+      { kind: "channel", value: "网页聊天", groupWith: true },
       { kind: "conv_type", value: "私聊", groupWith: false },
       { kind: "chat_id", value: routeName, groupWith: true, passToTool: true },
       { kind: "participant", value: routeName, groupWith: false },
@@ -259,10 +260,10 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
       // Skills
       if (path === "/api/skills" && req.method === "GET") return json(res, { skills: await deps.skillsManager.listAll() });
       if (path === "/api/skills" && req.method === "POST") { const b = JSON.parse(await body(req)); await deps.skillsManager.createSkill(b.name, b.content); return json(res, { ok: true }); }
-      if (path === "/api/skills/hub/install" && req.method === "POST") { const b = JSON.parse(await body(req)); const bundle = await deps.skillsManager.installFromHub(b.url, b.enable !== false); return json(res, { ok: true, name: bundle.name }); }
-      if (path.match(/^\/api\/skills\/([^/]+)\/enable$/) && req.method === "POST") { const n = path.split("/")[3]; await deps.skillsManager.enableSkill(n, true); return json(res, { ok: true }); }
-      if (path.match(/^\/api\/skills\/([^/]+)\/disable$/) && req.method === "POST") { const n = path.split("/")[3]; await deps.skillsManager.disableSkill(n); return json(res, { ok: true }); }
-      if (path.match(/^\/api\/skills\/([^/]+)$/) && req.method === "DELETE") { const n = path.split("/")[3]; await deps.skillsManager.deleteSkill(n); return json(res, { ok: true }); }
+      if (path === "/api/skills/hub/install" && req.method === "POST") { const b = JSON.parse(await body(req)); const bundle = await deps.skillsManager.installFromHub(b.url, b.enable !== false); deps.onRequestReconnect?.().catch(() => {}); return json(res, { ok: true, name: bundle.name }); }
+      if (path.match(/^\/api\/skills\/([^/]+)\/enable$/) && req.method === "POST") { const n = path.split("/")[3]; await deps.skillsManager.enableSkill(n, true); deps.onRequestReconnect?.().catch(() => {}); return json(res, { ok: true }); }
+      if (path.match(/^\/api\/skills\/([^/]+)\/disable$/) && req.method === "POST") { const n = path.split("/")[3]; await deps.skillsManager.disableSkill(n); deps.onRequestReconnect?.().catch(() => {}); return json(res, { ok: true }); }
+      if (path.match(/^\/api\/skills\/([^/]+)$/) && req.method === "DELETE") { const n = path.split("/")[3]; await deps.skillsManager.deleteSkill(n); deps.onRequestReconnect?.().catch(() => {}); return json(res, { ok: true }); }
       if (path.match(/^\/api\/skills\/([^/]+)\/content$/) && req.method === "GET") { const n = path.split("/")[3]; return json(res, { content: await deps.skillsManager.getSkillContent(n) }); }
       if (path === "/api/skills/reconnect" && req.method === "POST") {
         try {
