@@ -1,7 +1,7 @@
 {
   "name": "@lmcl/ailo-desktop",
   "version": "1.0.0",
-  "description": "Ailo desktop agent endpoint — screenshot, browser automation, file system, exec, code execution, MCP, Skills marketplace",
+  "description": "Ailo 超级端点 — 桌面能力 + 飞书 + 钉钉 + QQ + 邮件，按需配置启用",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,11 +9,13 @@
     "ailo-desktop": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node copy-static.mjs",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.56.1",
     "@lmcl/ailo-endpoint-sdk": "*",
+    "dingtalk-stream": "^2.0.4",
     "glob": "^11.0.0",
     "imapflow": "^1.2.10",
     "mailparser": "^3.6.6",
@@ -25,6 +27,7 @@
     "@types/mailparser": "^3.4.5",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^6.4.17",
+    "@types/ws": "^8.5.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }

@@ -3,13 +3,13 @@ name: dingtalk
 version: 1.0.0
 description: 钉钉即时通讯端点，连接企业内所有钉钉用户和群组
 tools:
-  - name: send
+  - name: dingtalk_send
     timeout: 10
     description: 向钉钉用户或群组发送消息
     parameters:
       type: object
       properties:
-        chat_id: { type: string, description: "会话标识（由 contextTags 中的 chat_id 获得）" }
+        chat_id: { type: string, description: "必须使用时空场前缀中 chat_id: 后面的原始值（如 grp:xxx 或 p2p:xxx），不可编造" }
         text: { type: string, description: 消息正文（支持 Markdown 格式） }
       required: [chat_id, text]
 
@@ -30,7 +30,7 @@ tools:
 
 ## 工具使用说明
 
-### send — 发送消息
+### dingtalk_send — 发送消息
 
 向指定会话发送文本或 Markdown 消息。文本中包含 Markdown 语法（如 `#`、`*`、`` ` ``）时自动使用 Markdown 格式发送。
 

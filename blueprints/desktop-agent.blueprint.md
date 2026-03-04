@@ -122,29 +122,24 @@ tools:
       required: [source, destination]
 
   - name: execute_code
-    description: 在本地执行 Python 或 JavaScript 代码，用于计算、数据处理、脚本等
-    timeout: 120
+    description: 在本地执行 Python 或 JavaScript 代码。立即启动，完成后结果自动推送回来，无需等待或轮询
+    timeout: 5
     parameters:
       type: object
       properties:
         language: { type: string, enum: [python, javascript], description: "编程语言" }
-        code: { type: string, description: "要执行的代码" }
-        timeout: { type: number, description: "超时毫秒数（默认 60000）" }
+        code: { type: string, description: "完整可执行的代码，不要加 markdown 代码块标记" }
       required: [language, code]
 
   - name: exec
-    description: 在本地机器执行 shell 命令（action：run/poll/stop/list/write）
-    timeout: 120
+    description: 在本地机器执行 shell 命令。立即启动，完成后结果自动推送回来，无需等待或轮询
+    timeout: 5
     parameters:
       type: object
       properties:
-        action: { type: string, enum: [run, poll, stop, list, write], description: "操作类型" }
-        command: { type: string, description: "要执行的命令（action=run 时必填）" }
-        task_id: { type: string, description: "后台任务 ID（action=poll/stop/write 时需要）" }
-        timeout: { type: number, description: "超时秒数（默认 30）" }
-        data: { type: string, description: "stdin 输入内容（action=write 时需要）" }
-        cwd: { type: string, description: "工作目录（action=run 时可选）" }
-      required: [action]
+        command: { type: string, description: "要执行的命令" }
+        cwd: { type: string, description: "工作目录（可选）" }
+      required: [command]
 
   - name: mcp_manage
     description: 管理本地 MCP 服务（list/create/delete/start/stop）。start 后自动向 Ailo 注册新工具
@@ -233,15 +228,6 @@ tools:
         amount: { type: number, description: "滚动量（默认 3）" }
         screenshot_after: { type: boolean, description: "操作后自动截图（默认 false）" }
       required: [action]
-
-  - name: send_file
-    description: 将本地文件发送给当前对话用户
-    timeout: 30
-    parameters:
-      type: object
-      properties:
-        path: { type: string, description: "本地文件绝对路径" }
-      required: [path]
 ---
 
 桌面 Agent 运行在用户本地机器上，提供 Ailo 服务端无法直接执行的本地能力。
@@ -258,18 +244,13 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 返回本地时间、星期和时区，如 `2026-03-01 17:30:45 Saturday (UTC+0800)`。
 
 ### execute_code
-在本地执行 Python 或 JavaScript 代码。写入临时文件后执行，返回 stdout、stderr 和退出码。用于数据计算、脚本自动化等。
+在本地执行 Python 或 JavaScript 代码。调用后立即返回确认，代码在后台运行，完成后结果（stdout、stderr、退出码）自动推送回来。用于数据计算、脚本自动化等。
 
 ### append_file
 向文件末尾追加内容。文件不存在时自动创建（含父目录）。
 
 ### exec
-五种操作：
-- `run`：执行命令，超时后转后台运行，返回 taskId
-- `poll`：查看后台任务输出（需 taskId）
-- `stop`：终止任务
-- `list`：列出所有运行中的任务
-- `write`：向交互式任务发送 stdin 输入
+在本地执行 shell 命令。调用后立即返回确认，命令在后台运行，完成后结果自动推送回来。无需轮询或手动查看状态。
 
 ### mcp_manage
 管理本地 MCP 服务。执行 `start` 后，端点会自动重连 Ailo 并注册新发现的工具。
@@ -302,12 +283,8 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 
 `screenshot_after=true` 时操作完成后自动截图返回，可省去额外的 screenshot 调用。
 
-### send_file
-将本地文件推送给当前对话用户。文件通过主动上行（endpoint.accept）直接发送给用户所在频道。
-
 ## 约束
 - screenshot 需要操作系统权限（macOS 需屏幕录制权限）
-- exec 超时默认 30 秒，最长 300 秒
-- send_file 的文件路径必须是绝对路径
+- exec 和 execute_code 都是异步执行，立即返回确认，完成后自动回报结果
 - browser_use 需要安装 Playwright 浏览器（首次使用前需执行 `npx playwright install chromium`）
 - browser_use 的 pdf 导出仅在无头模式下可用

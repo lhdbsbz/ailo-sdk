@@ -174,7 +174,7 @@ function esc(s: string): string {
 
 function buildFieldHTML(f: ConfigField): string {
   const id = fieldId(f.key);
-  const inputType = f.type === "password" ? "password" : f.type === "number" ? "number" : "text";
+  const inputType = f.type === "number" ? "number" : "text";
   const ph = esc(f.placeholder ?? "");
   const envHint = f.envVar ? ` <span class="env-badge" id="env_${id}" style="display:none">由 ${esc(f.envVar)} 设置</span>` : "";
   return `    <div class="form-group"><label>${esc(f.label)}${f.required ? " *" : ""}${envHint}</label><input id="${id}" type="${inputType}" placeholder="${ph}" autocomplete="off"></div>`;

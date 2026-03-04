@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Ailo Desktop — 配置/重连/退避 流程（可复用到其他 SDK 应用）
+ * Ailo Desktop — 超级端点
  *
- * 1. 单进程内状态：connectionState + webchatCtxRef，配置页只起一次。
- * 2. 保存配置后：已连 → 断线并用新配置重连；未连 → 用新配置发起连接。
- * 3. 连接失败：onConnectFailure 内退避重试，每次用 loadConnectionConfig 拿最新配置再 client.reconnect。
+ * 集成桌面能力 + 飞书 + 钉钉 + QQ + 邮件。
+ * 各平台按需配置：有完整配置才启动对应 handler 并上报对应 blueprint。
+ * 未配置的平台不会被 Ailo 感知，不影响其他能力正常工作。
  *
  * 子命令：ailo-desktop init [--defaults] — 初始化 config.json 与 Skills 目录（见 cli.ts）。
  */
@@ -25,6 +25,7 @@ if (subcommand === "init") {
       process.exit(1);
     });
 }
+
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { ContentPart, ToolCapability } from "@lmcl/ailo-endpoint-sdk";
 import { inferMime, classifyMedia, mediaPart } from "@lmcl/ailo-endpoint-sdk";
@@ -32,11 +33,11 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 import { takeScreenshot } from "./screenshot.js";
 import { execTool } from "./exec_tool.js";
 import { fsTool } from "./fs_tools.js";
 import { LocalMCPManager } from "./mcp_manager.js";
-import { sendFile } from "./send_file.js";
 import { browserUse, stopBrowser } from "./browser_control.js";
 import { executeCode } from "./code_executor.js";
 import { startConfigServer } from "./config_server.js";
@@ -44,6 +45,9 @@ import { getCurrentTime } from "./time_tool.js";
 import { mouseKeyboard } from "./mouse_keyboard.js";
 import { SkillsManager } from "./skills_manager.js";
 import { EmailHandler, type EmailConfig } from "./email_handler.js";
+import { FeishuHandler } from "./feishu-handler.js";
+import { DingTalkHandler } from "./dingtalk-handler.js";
+import { QQHandler } from "./qq-handler.js";
 import {
   loadConnectionConfig,
   hasValidConfig,
@@ -59,6 +63,13 @@ const BLUEPRINT_URL =
   join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md");
 const BLUEPRINT_WEBCHAT = join(BLUEPRINTS_DIR, "webchat.blueprint.md");
 const BLUEPRINT_EMAIL = join(BLUEPRINTS_DIR, "email.blueprint.md");
+const BLUEPRINT_FEISHU = join(BLUEPRINTS_DIR, "feishu.blueprint.md");
+const BLUEPRINT_DINGTALK = join(BLUEPRINTS_DIR, "dingtalk.blueprint.md");
+const BLUEPRINT_QQ = join(BLUEPRINTS_DIR, "qq.blueprint.md");
+
+// ──────────────────────────────────────────────────────────────
+// 配置加载：各平台 + email
+// ──────────────────────────────────────────────────────────────
 
 const EMAIL_ENV_MAPPING = [
   { envVar: "IMAP_HOST", configPath: "email.imapHost" },
@@ -71,11 +82,79 @@ const EMAIL_ENV_MAPPING = [
   { envVar: "SMTP_PASSWORD", configPath: "email.smtpPassword" },
 ] as const;
 
+const FEISHU_ENV_MAPPING = [
+  { envVar: "FEISHU_APP_ID", configPath: "feishu.appId" },
+  { envVar: "FEISHU_APP_SECRET", configPath: "feishu.appSecret" },
+] as const;
+
+const DINGTALK_ENV_MAPPING = [
+  { envVar: "DINGTALK_CLIENT_ID", configPath: "dingtalk.clientId" },
+  { envVar: "DINGTALK_CLIENT_SECRET", configPath: "dingtalk.clientSecret" },
+] as const;
+
+const QQ_ENV_MAPPING = [
+  { envVar: "QQ_APP_ID", configPath: "qq.appId" },
+  { envVar: "QQ_APP_SECRET", configPath: "qq.appSecret" },
+  { envVar: "QQ_API_BASE", configPath: "qq.apiBase" },
+] as const;
+
+export interface FeishuConfig { appId: string; appSecret: string }
+export interface DingtalkConfig { clientId: string; clientSecret: string }
+export interface QQConfig { appId: string; appSecret: string; apiBase?: string }
+
+function loadEmailConfig(configPath: string): EmailConfig | null {
+  const raw = readConfig(configPath);
+  const { merged } = mergeWithEnv(raw, EMAIL_ENV_MAPPING as any);
+  const e = (merged as Record<string, unknown>).email as Record<string, unknown> | undefined;
+  if (!e?.imapHost || !e?.imapUser || !e?.imapPassword) return null;
+  return {
+    imapHost: e.imapHost as string,
+    imapPort: Number(e.imapPort) || 993,
+    imapUser: e.imapUser as string,
+    imapPassword: e.imapPassword as string,
+    smtpHost: (e.smtpHost as string) || undefined,
+    smtpPort: e.smtpPort ? Number(e.smtpPort) : undefined,
+    smtpUser: (e.smtpUser as string) || undefined,
+    smtpPassword: (e.smtpPassword as string) || undefined,
+  };
+}
+
+function loadFeishuConfig(configPath: string): FeishuConfig | null {
+  const raw = readConfig(configPath);
+  const { merged } = mergeWithEnv(raw, FEISHU_ENV_MAPPING as any);
+  const f = (merged as Record<string, unknown>).feishu as Record<string, unknown> | undefined;
+  if (!f?.appId || !f?.appSecret) return null;
+  return { appId: f.appId as string, appSecret: f.appSecret as string };
+}
+
+function loadDingtalkConfig(configPath: string): DingtalkConfig | null {
+  const raw = readConfig(configPath);
+  const { merged } = mergeWithEnv(raw, DINGTALK_ENV_MAPPING as any);
+  const d = (merged as Record<string, unknown>).dingtalk as Record<string, unknown> | undefined;
+  if (!d?.clientId || !d?.clientSecret) return null;
+  return { clientId: d.clientId as string, clientSecret: d.clientSecret as string };
+}
+
+function loadQQConfig(configPath: string): QQConfig | null {
+  const raw = readConfig(configPath);
+  const { merged } = mergeWithEnv(raw, QQ_ENV_MAPPING as any);
+  const q = (merged as Record<string, unknown>).qq as Record<string, unknown> | undefined;
+  if (!q?.appId || !q?.appSecret) return null;
+  return { appId: q.appId as string, appSecret: q.appSecret as string, apiBase: q.apiBase as string | undefined };
+}
+
+// ──────────────────────────────────────────────────────────────
+// 运行时状态
+// ──────────────────────────────────────────────────────────────
+
 const mcpManager = new LocalMCPManager();
 const skillsManager = new SkillsManager();
 let endpointCtx: EndpointContext | null = null;
 let webchatApi: { recordAiloReply: (text: string, participantName: string) => boolean } | null = null;
 let emailHandler: EmailHandler | null = null;
+let feishuHandler: FeishuHandler | null = null;
+let dingtalkHandler: DingTalkHandler | null = null;
+let qqHandler: QQHandler | null = null;
 let lastMcpToolSnapshot: Map<string, ToolCapability> = new Map();
 
 function computeToolDiff(oldTools: Map<string, ToolCapability>, newTools: ToolCapability[]): {
@@ -129,22 +208,79 @@ async function initSubsystems(): Promise<void> {
   }
 }
 
-function loadEmailConfig(configPath: string): EmailConfig | null {
-  const raw = readConfig(configPath);
-  const { merged } = mergeWithEnv(raw, EMAIL_ENV_MAPPING as any);
-  const e = (merged as Record<string, unknown>).email as Record<string, unknown> | undefined;
-  if (!e?.imapHost || !e?.imapUser || !e?.imapPassword) return null;
-  return {
-    imapHost: e.imapHost as string,
-    imapPort: Number(e.imapPort) || 993,
-    imapUser: e.imapUser as string,
-    imapPassword: e.imapPassword as string,
-    smtpHost: (e.smtpHost as string) || undefined,
-    smtpPort: e.smtpPort ? Number(e.smtpPort) : undefined,
-    smtpUser: (e.smtpUser as string) || undefined,
-    smtpPassword: (e.smtpPassword as string) || undefined,
-  };
+// ──────────────────────────────────────────────────────────────
+// 平台 handler 生命周期
+// ──────────────────────────────────────────────────────────────
+
+async function startPlatformHandlers(ctx: EndpointContext, configPath: string): Promise<void> {
+  // 邮件
+  const emailCfg = loadEmailConfig(configPath);
+  if (emailCfg) {
+    emailHandler = new EmailHandler(emailCfg);
+    await emailHandler.start(ctx);
+    console.log("[desktop] 邮件通道已启动");
+  }
+
+  // 飞书
+  const feishuCfg = loadFeishuConfig(configPath);
+  if (feishuCfg) {
+    feishuHandler = new FeishuHandler(feishuCfg);
+    await feishuHandler.start(ctx);
+    console.log("[desktop] 飞书通道已启动");
+  }
+
+  // 钉钉
+  const dingtalkCfg = loadDingtalkConfig(configPath);
+  if (dingtalkCfg) {
+    dingtalkHandler = new DingTalkHandler(dingtalkCfg);
+    await dingtalkHandler.start(ctx);
+    console.log("[desktop] 钉钉通道已启动");
+  }
+
+  // QQ
+  const qqCfg = loadQQConfig(configPath);
+  if (qqCfg) {
+    qqHandler = new QQHandler(qqCfg);
+    await qqHandler.start(ctx);
+    console.log("[desktop] QQ 通道已启动");
+  }
 }
+
+async function stopPlatformHandlers(): Promise<void> {
+  if (emailHandler) {
+    await emailHandler.stop();
+    emailHandler = null;
+  }
+  if (feishuHandler) {
+    await feishuHandler.stop();
+    feishuHandler = null;
+  }
+  if (dingtalkHandler) {
+    await dingtalkHandler.stop();
+    dingtalkHandler = null;
+  }
+  if (qqHandler) {
+    await qqHandler.stop();
+    qqHandler = null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 动态计算 blueprints（只注册已配置的平台）
+// ──────────────────────────────────────────────────────────────
+
+function buildBlueprints(configPath: string): string[] {
+  const list: string[] = [BLUEPRINT_URL, BLUEPRINT_WEBCHAT];
+  if (loadEmailConfig(configPath)) list.push(BLUEPRINT_EMAIL);
+  if (loadFeishuConfig(configPath)) list.push(BLUEPRINT_FEISHU);
+  if (loadDingtalkConfig(configPath)) list.push(BLUEPRINT_DINGTALK);
+  if (loadQQConfig(configPath)) list.push(BLUEPRINT_QQ);
+  return list;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 工具 handlers
+// ──────────────────────────────────────────────────────────────
 
 const FS_TOOLS = [
   "read_file", "write_file", "edit_file", "append_file", "list_directory",
@@ -156,13 +292,34 @@ function requireEmail(): EmailHandler {
   return emailHandler;
 }
 
+function requireFeishu(): FeishuHandler {
+  if (!feishuHandler) throw new Error("飞书未配置，请在配置页「飞书」标签中填写应用信息");
+  return feishuHandler;
+}
+
+function requireDingtalk(): DingTalkHandler {
+  if (!dingtalkHandler) throw new Error("钉钉未配置，请在配置页「钉钉」标签中填写应用信息");
+  return dingtalkHandler;
+}
+
+function requireQQ(): QQHandler {
+  if (!qqHandler) throw new Error("QQ 未配置，请在配置页「QQ」标签中填写应用信息");
+  return qqHandler;
+}
+
 function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> {
   const handlers: Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> = {
     screenshot: async (args) => takeScreenshot(!!args.capture_window),
     get_current_time: async () => getCurrentTime(),
     browser_use: async (args) => browserUse(args),
-    execute_code: async (args) => executeCode(args),
-    exec: async (args) => execTool(args),
+    execute_code: async (args) => {
+      if (!endpointCtx) throw new Error("端点未就绪");
+      return executeCode(endpointCtx, args);
+    },
+    exec: async (args) => {
+      if (!endpointCtx) throw new Error("端点未就绪");
+      return execTool(endpointCtx, args);
+    },
     mouse_keyboard: async (args) => mouseKeyboard(args),
     mcp_manage: async (args) => {
       const result = await mcpManager.handle(args);
@@ -171,14 +328,59 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
     },
     send_file: async (args) => {
       if (!endpointCtx) throw new Error("端点未就绪");
-      return sendFile(endpointCtx, args.path as string);
+      const p = args.path as string;
+      if (!p) throw new Error("path 为必填参数");
+      await endpointCtx.sendFile(p);
+      return `文件已发送：${p}`;
     },
-    send: async (args) => {
-      const text = args.text as string;
+    // 网页聊天发送
+    webchat_send: async (args) => {
+      const text = args.text as string | undefined;
       const participantName = args.participantName as string;
-      if (!webchatApi) return "网页聊天未就绪，请先连接 Ailo 并打开配置页。";
-      const ok = webchatApi.recordAiloReply(text ?? "", participantName ?? "");
-      return ok ? "已发送" : "未找到对应用户或发送失败，请确认 participantName 与网页聊天中的称呼一致且用户在线。";
+      const attachments = (args.attachments as { path?: string }[]) ?? [];
+      if (!webchatApi && attachments.length === 0) return "网页聊天未就绪，请先连接 Ailo 并打开配置页。";
+      const results: string[] = [];
+      // 发送文字
+      if (text && webchatApi) {
+        const ok = webchatApi.recordAiloReply(text, participantName ?? "");
+        results.push(ok ? "文字已发送" : "文字发送失败，请确认 participantName 与网页聊天中的称呼一致且用户在线");
+      }
+      // 发送附件
+      if (attachments.length > 0) {
+        if (!endpointCtx) return "端点未就绪，无法发送附件";
+        for (const att of attachments) {
+          if (att.path) {
+            await endpointCtx.sendFile(att.path);
+            results.push(`文件已发送：${att.path}`);
+          }
+        }
+      }
+      return results.length > 0 ? results.join("；") : "请提供 text 或 attachments";
+    },
+    // 飞书发送
+    feishu_send: async (args) => {
+      const h = requireFeishu();
+      const atts = ((args.attachments as any[]) ?? []).map((a: any) => ({
+        type: a.type,
+        file_path: a.path,
+        mime: a.mime,
+        name: a.name,
+        duration: a.duration,
+      }));
+      await h.sendText(args.chat_id as string, (args.text as string) ?? "", atts);
+      return `已发送到 ${args.chat_id}`;
+    },
+    // 钉钉发送（blueprint 中 tool name 为 send，由 blueprint 决定；这里提供底层实现）
+    dingtalk_send: async (args) => {
+      const h = requireDingtalk();
+      await h.sendText(args.chat_id as string, (args.text as string) ?? "");
+      return `已发送到 ${args.chat_id}`;
+    },
+    // QQ 发送
+    qq_send: async (args) => {
+      const h = requireQQ();
+      await h.sendText(args.chat_id as string, (args.text as string) ?? "", (args.msg_id as string) ?? undefined);
+      return `已发送到 ${args.chat_id}`;
     },
     // ── 邮件工具 ──
     email_send: async (args) => {
@@ -249,14 +451,15 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
   return handlers;
 }
 
+// ──────────────────────────────────────────────────────────────
+// 主函数
+// ──────────────────────────────────────────────────────────────
+
 async function main(): Promise<void> {
   const port = Number(process.env.CONFIG_PORT ?? 19801) || 19801;
   const configPath = join(process.cwd(), "config.json");
 
-  const connectionState = {
-    connected: false,
-    endpointId: "",
-  };
+  const connectionState = { connected: false, endpointId: "" };
   let webchatCtxRef: EndpointContext | null = null;
   let connectAttempt = 0;
   let endpointConnecting = false;
@@ -270,6 +473,7 @@ async function main(): Promise<void> {
     connectAttempt = 0;
     try {
       const skills = await skillsManager.getEnabledSkillsMeta();
+      const blueprints = buildBlueprints(configPath);
       runEndpoint({
         ailoWsUrl: cfg.url,
         ailoApiKey: cfg.apiKey,
@@ -284,19 +488,11 @@ async function main(): Promise<void> {
             webchatCtxRef = ctx;
             lastMcpToolSnapshot = new Map(mcpManager.getAllPrivateTools().map((t) => [t.name, t]));
             serverRef.notifyContextAttached();
-            // 启动邮件通道
-            const emailCfg = loadEmailConfig(configPath);
-            if (emailCfg) {
-              emailHandler = new EmailHandler(emailCfg);
-              await emailHandler.start(ctx);
-            }
+            await startPlatformHandlers(ctx, configPath);
             console.log("[desktop] 桌面端点已启动");
           },
           stop: async () => {
-            if (emailHandler) {
-              await emailHandler.stop();
-              emailHandler = null;
-            }
+            await stopPlatformHandlers();
             endpointCtx = null;
             endpointConnecting = false;
             connectionState.connected = false;
@@ -308,7 +504,7 @@ async function main(): Promise<void> {
           },
         },
         caps: ["message", "tool_execute"],
-        blueprints: [BLUEPRINT_URL, BLUEPRINT_WEBCHAT, BLUEPRINT_EMAIL],
+        blueprints,
         tools: mcpManager.getAllPrivateTools(),
         toolHandlers: buildToolHandlers(),
         skills,
@@ -349,6 +545,7 @@ async function main(): Promise<void> {
     configPath,
     blueprintUrl: BLUEPRINT_URL,
     blueprintLocalPath: join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md"),
+    getBlueprintPaths: () => buildBlueprints(configPath),
     onWebchatReady: (api) => { webchatApi = api; },
     onRequestReconnect: async () => {
       if (!endpointCtx) return;
@@ -381,6 +578,54 @@ async function main(): Promise<void> {
     getEmailStatus: () => ({
       configured: !!loadEmailConfig(configPath),
       running: emailHandler?.running ?? false,
+    }),
+    onFeishuConfigSaved: async () => {
+      if (!endpointCtx) return;
+      if (feishuHandler) {
+        await feishuHandler.stop();
+        feishuHandler = null;
+      }
+      const feishuCfg = loadFeishuConfig(configPath);
+      if (feishuCfg) {
+        feishuHandler = new FeishuHandler(feishuCfg);
+        await feishuHandler.start(endpointCtx);
+      }
+    },
+    getFeishuStatus: () => ({
+      configured: !!loadFeishuConfig(configPath),
+      running: !!feishuHandler,
+    }),
+    onDingtalkConfigSaved: async () => {
+      if (!endpointCtx) return;
+      if (dingtalkHandler) {
+        await dingtalkHandler.stop();
+        dingtalkHandler = null;
+      }
+      const dingtalkCfg = loadDingtalkConfig(configPath);
+      if (dingtalkCfg) {
+        dingtalkHandler = new DingTalkHandler(dingtalkCfg);
+        await dingtalkHandler.start(endpointCtx);
+      }
+    },
+    getDingtalkStatus: () => ({
+      configured: !!loadDingtalkConfig(configPath),
+      running: !!dingtalkHandler,
+    }),
+    onQQConfigSaved: async () => {
+      if (!endpointCtx) return;
+      if (qqHandler) {
+        await qqHandler.stop();
+        qqHandler = null;
+      }
+      const qqCfg = loadQQConfig(configPath);
+      if (qqCfg) {
+        qqHandler = new QQHandler(qqCfg);
+        await qqHandler.start(endpointCtx);
+      }
+    },
+    getQQStatus: () => ({
+      configured: !!loadQQConfig(configPath),
+      running: !!qqHandler,
     }),
   });
 

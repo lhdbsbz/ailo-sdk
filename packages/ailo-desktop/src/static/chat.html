@@ -332,6 +332,36 @@
       color: var(--text-muted);
       padding: 0 4px;
       opacity: 0.7;
+
+    /* ─── 附件渲染 ────────────────────────────────── */
+    .chat-img {
+      display: block;
+      max-width: 240px;
+      max-height: 320px;
+      border-radius: 10px;
+      cursor: zoom-in;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      object-fit: cover;
+    }
+
+    .chat-file {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 8px 14px;
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-primary);
+      text-decoration: none;
+      font-size: 14px;
+      transition: background .15s;
+    }
+    .chat-file:hover { background: var(--bg-surface-2); }
+    .chat-file-icon { font-size: 18px; flex-shrink: 0; }
+    .chat-file-name { word-break: break-all; }
     }
 
     /* Empty State */
@@ -811,7 +841,7 @@
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'reply') {
-            addMessage('ailo', data.text);
+            addMessage('ailo', data.text || '', data.content || []);
           }
         } catch (err) {
           console.error('Failed to parse message:', err);
@@ -847,17 +877,35 @@
       const text = messageInput.value.trim();
       if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-      appendAndSave('user', text, Date.now());
+      appendAndSave('user', text, Date.now(), []);
       messageInput.value = '';
       messageInput.style.height = 'auto';
 
       ws.send(JSON.stringify({ type: 'chat', text, participantName: userName || '用户' }));
     }
 
-    function appendAndSave(sender, text, timestamp) {
+    function buildBubbleHTML(text, content) {
+      // content 是 WebchatContentItem[] 或空数组
+      if (!content || content.length === 0) {
+        return `<div class="message-bubble">${escapeHtml(text || '')}</div>`;
+      }
+      let inner = '';
+      for (const item of content) {
+        if (item.kind === 'text') {
+          inner += `<div>${escapeHtml(item.text || '')}</div>`;
+        } else if (item.kind === 'image') {
+          inner += `<img class="chat-img" src="${escapeHtml(item.url || '')}" alt="${escapeHtml(item.name || '图片')}" onclick="window.open(this.src,'_blank')">`;
+        } else if (item.kind === 'file') {
+          inner += `<a class="chat-file" href="${escapeHtml(item.url || '')}" target="_blank" rel="noopener" download="${escapeHtml(item.name || 'file')}"><span class="chat-file-icon">📎</span><span class="chat-file-name">${escapeHtml(item.name || '文件')}</span></a>`;
+        }
+      }
+      return `<div class="message-bubble">${inner}</div>`;
+    }
+
+    function appendAndSave(sender, text, timestamp, content) {
       emptyState.style.display = 'none';
       const msgs = loadFromStorage();
-      msgs.push({ sender, text, timestamp });
+      msgs.push({ sender, text, timestamp, content: content || [] });
       saveToStorage(msgs);
 
       const div = document.createElement('div');
@@ -870,7 +918,7 @@
         <div class="message-avatar">${avatarInitials}</div>
         <div class="message-content">
           <div class="sender">${senderLabel}</div>
-          <div class="message-bubble">${escapeHtml(text)}</div>
+          ${buildBubbleHTML(text, content || [])}
           <div class="message-time">${formatTime(timestamp)}</div>
         </div>
       `;
@@ -880,8 +928,8 @@
       updateClearButtonState();
     }
 
-    function addMessage(sender, text) {
-      appendAndSave(sender, text, Date.now());
+    function addMessage(sender, text, content) {
+      appendAndSave(sender, text, Date.now(), content || []);
     }
 
     function renderFromStorage() {
@@ -900,12 +948,13 @@
         const avatarInitials = m.sender === 'user' ? getInitials(userName) : 'A';
         const senderLabel = m.sender === 'user' ? (userName || '你') : 'Ailo';
         const timestamp = m.timestamp || Date.now();
+        const content = m.content || [];
         
         div.innerHTML = `
           <div class="message-avatar">${avatarInitials}</div>
           <div class="message-content">
             <div class="sender">${senderLabel}</div>
-            <div class="message-bubble">${escapeHtml(m.text ?? m.content ?? '')}</div>
+            ${buildBubbleHTML(m.text ?? '', content)}
             <div class="message-time">${formatTime(timestamp)}</div>
           </div>
         `;
