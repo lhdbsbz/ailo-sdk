@@ -28,7 +28,8 @@ const STRUCTURAL_ROLES = new Set([
 
 function getIndentLevel(line: string): number {
   const m = line.match(/^(\s*)/);
-  return m ? Math.floor(m[1].length / 2) : 0;
+  const INDENT_WIDTH = 2;
+  return m ? Math.floor(m[1].length / INDENT_WIDTH) : 0;
 }
 
 interface Tracker {

@@ -228,7 +228,8 @@ API Keys are created and managed in the **Ailo admin dashboard**. No code-level 
 | REST API | Method | Description |
 |---------|--------|-------------|
 | `/api/endpoint-keys` | GET | List all keys (values are masked) |
-| `/api/endpoint-keys` | POST | Create a key (body: `label`, `endpointType`) |
+| `/api/endpoint-keys/:id` | GET | Get single key by ID (for admin detail view) |
+| `/api/endpoint-keys` | POST | Create a key (body: `label`) |
 | `/api/endpoint-keys/:id` | DELETE | Revoke a key |
 
 Create response example (**the full key is only returned at creation time**; subsequent queries are masked):
@@ -239,7 +240,6 @@ Create response example (**the full key is only returned at creation time**; sub
     "id": "epk_a1b2c3d4e5f6g7h8",
     "key": "ailo_ep_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "label": "Living Room Robot",
-    "endpointType": "robot",
     "createdAt": "2026-01-01T00:00:00Z"
   }
 }

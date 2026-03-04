@@ -14,6 +14,8 @@ import os from "os";
 import path from "path";
 import type { EndpointContext, ContextTag, AcceptMessage } from "@lmcl/ailo-endpoint-sdk";
 import { textPart, mediaPart, inferMime, classifyMedia, getWorkDir } from "@lmcl/ailo-endpoint-sdk";
+import { errMsg } from "./utils.js";
+import { NO_SUBJECT } from "./constants.js";
 
 export interface EmailConfig {
   imapHost: string;
@@ -49,6 +51,26 @@ export interface EmailDetail {
 interface Checkpoint {
   lastUid: number;
   uidValidity: number;
+}
+
+function formatAddress(addr: { name?: string; address?: string } | undefined): string {
+  if (!addr) return "";
+  return `${addr.name ?? ""} <${addr.address ?? ""}>`.trim();
+}
+
+function formatToAddresses(to: ParsedMail["to"]): string {
+  if (!to) return "";
+  return (Array.isArray(to) ? to : [to]).flatMap((t) => t.value.map((v) => v.address)).filter(Boolean).join(", ");
+}
+
+function mapAttachments(
+  attachments?: { filename: string; content: string; contentType?: string }[],
+): { filename: string; content: string; contentType?: string }[] | undefined {
+  return attachments?.map((a) => ({
+    filename: a.filename,
+    content: a.content,
+    contentType: a.contentType,
+  }));
 }
 
 const RECONNECT_BASE_MS = 2_000;
@@ -102,7 +124,7 @@ export class EmailHandler {
         await this.idleLoop();
       } catch (err) {
         if (this.stopped) break;
-        console.error("[email] IMAP error:", (err as Error).message);
+        console.error("[email] IMAP error:", errMsg(err));
       }
       if (this.stopped) break;
       const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
@@ -171,11 +193,11 @@ export class EmailHandler {
           const parsed = await simpleParser(msg.source as Buffer);
           await this.emitMessage(parsed);
         } catch (err) {
-          console.error(`[email] parse uid=${msg.uid} failed:`, (err as Error).message);
+          console.error(`[email] parse uid=${msg.uid} failed:`, errMsg(err));
         }
       }
     } catch (err) {
-      console.error("[email] fetch error:", (err as Error).message);
+      console.error("[email] fetch error:", errMsg(err));
     }
 
     if (maxUid > this.lastUid) {
@@ -193,7 +215,7 @@ export class EmailHandler {
     try {
       await this.ctx.storage.setData("email_checkpoint", JSON.stringify(cp));
     } catch (err) {
-      console.error("[email] save checkpoint failed:", (err as Error).message);
+      console.error("[email] save checkpoint failed:", errMsg(err));
     }
   }
 
@@ -207,7 +229,7 @@ export class EmailHandler {
       this.uidValidity = cp.uidValidity ?? 0;
       console.log(`[email] restored checkpoint: lastUid=${this.lastUid}, uidValidity=${this.uidValidity}`);
     } catch (err) {
-      console.error("[email] restore checkpoint failed:", (err as Error).message);
+      console.error("[email] restore checkpoint failed:", errMsg(err));
     }
   }
 
@@ -218,7 +240,7 @@ export class EmailHandler {
     const from = parsed.from?.value?.[0];
     const fromAddr = from?.address ?? "unknown";
     const fromName = from?.name ?? fromAddr;
-    const subject = parsed.subject ?? "（无主题）";
+    const subject = parsed.subject ?? NO_SUBJECT;
     const text = parsed.text ?? (typeof parsed.html === "string" ? parsed.html : "") ?? "";
     const attachments = await this.saveAttachments(parsed);
 
@@ -241,7 +263,7 @@ export class EmailHandler {
     try {
       await this.ctx.accept({ content, contextTags });
     } catch (err) {
-      console.error("[email] accept failed:", (err as Error).message);
+      console.error("[email] accept failed:", errMsg(err));
     }
   }
 
@@ -279,12 +301,11 @@ export class EmailHandler {
 
       const items: EmailListItem[] = [];
       for await (const msg of imap.fetch(slice.join(","), { uid: true, envelope: true, flags: true }, { uid: true })) {
-        const f = msg.envelope?.from?.[0];
         items.push({
           uid: msg.uid,
-          from: f ? `${f.name ?? ""} <${f.address ?? ""}>`.trim() : "",
+          from: formatAddress(msg.envelope?.from?.[0]),
           to: msg.envelope?.to?.map((a: { address?: string }) => a.address).filter(Boolean).join(", ") ?? "",
-          subject: msg.envelope?.subject ?? "（无主题）",
+          subject: msg.envelope?.subject ?? NO_SUBJECT,
           date: msg.envelope?.date?.toISOString() ?? "",
           isRead: msg.flags?.has("\\Seen") ?? false,
         });
@@ -307,16 +328,11 @@ export class EmailHandler {
       const parsed = await simpleParser(raw.source as Buffer);
       await imap.messageFlagsAdd(String(opts.uid), ["\\Seen"], { uid: true }).catch(() => {});
 
-      const from = parsed.from?.value?.[0];
-      const toObj = parsed.to;
-      const toAddrs = toObj
-        ? (Array.isArray(toObj) ? toObj : [toObj]).flatMap((t) => t.value.map((v) => v.address)).filter(Boolean).join(", ")
-        : "";
       return {
         uid: opts.uid,
-        from: from ? `${from.name ?? ""} <${from.address ?? ""}>`.trim() : "",
-        to: toAddrs,
-        subject: parsed.subject ?? "（无主题）",
+        from: formatAddress(parsed.from?.value?.[0]),
+        to: formatToAddresses(parsed.to),
+        subject: parsed.subject ?? NO_SUBJECT,
         date: parsed.date?.toISOString() ?? "",
         text: parsed.text ?? undefined,
         html: typeof parsed.html === "string" ? parsed.html : undefined,
@@ -358,12 +374,11 @@ export class EmailHandler {
 
       const items: EmailListItem[] = [];
       for await (const msg of imap.fetch(sorted.join(","), { uid: true, envelope: true, flags: true }, { uid: true })) {
-        const f = msg.envelope?.from?.[0];
         items.push({
           uid: msg.uid,
-          from: f ? `${f.name ?? ""} <${f.address ?? ""}>`.trim() : "",
+          from: formatAddress(msg.envelope?.from?.[0]),
           to: msg.envelope?.to?.map((a: { address?: string }) => a.address).filter(Boolean).join(", ") ?? "",
-          subject: msg.envelope?.subject ?? "（无主题）",
+          subject: msg.envelope?.subject ?? NO_SUBJECT,
           date: msg.envelope?.date?.toISOString() ?? "",
           isRead: msg.flags?.has("\\Seen") ?? false,
         });
@@ -453,14 +468,10 @@ export class EmailHandler {
       to: opts.to,
       cc: opts.cc,
       bcc: opts.bcc,
-      subject: opts.subject ?? "（无主题）",
+      subject: opts.subject ?? NO_SUBJECT,
       text: opts.body,
       html: opts.html,
-      attachments: opts.attachments?.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType,
-      })),
+      attachments: mapAttachments(opts.attachments),
     });
   }
 
@@ -491,11 +502,7 @@ export class EmailHandler {
       html: opts.html,
       inReplyTo: parsed.messageId,
       references: refs,
-      attachments: opts.attachments?.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType,
-      })),
+      attachments: mapAttachments(opts.attachments),
     });
   }
 

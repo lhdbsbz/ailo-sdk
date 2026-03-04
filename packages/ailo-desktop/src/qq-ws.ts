@@ -19,7 +19,7 @@ import {
   MAX_RECONNECT_ATTEMPTS,
 } from "./qq-types.js";
 
-export type DispatchHandler = (event: string, data: any) => void;
+type DispatchHandler = (event: string, data: any) => void;
 
 export class QQGatewayClient {
   private ws: WebSocket | null = null;
@@ -122,7 +122,7 @@ export class QQGatewayClient {
 
     switch (payload.op) {
       case OP_HELLO:
-        this.startHeartbeat(payload.d?.heartbeat_interval ?? 41250);
+        this.startHeartbeat((payload.d as Record<string, unknown>)?.heartbeat_interval as number ?? 41250);
         if (this.sessionId) {
           this.sendResume();
         } else {
@@ -132,7 +132,7 @@ export class QQGatewayClient {
 
       case OP_DISPATCH:
         if (payload.t === "READY") {
-          this.sessionId = payload.d?.session_id ?? null;
+          this.sessionId = (payload.d as Record<string, unknown>)?.session_id as string ?? null;
           this.log("info", "READY", { session_id: this.sessionId });
         }
         if (payload.t) {

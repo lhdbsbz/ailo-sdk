@@ -9,8 +9,9 @@ import { join } from "path";
 import { homedir } from "os";
 import { writeConfig } from "@lmcl/ailo-endpoint-sdk";
 import { SkillsManager } from "./skills_manager.js";
+import { CONFIG_FILENAME } from "./constants.js";
 
-const CONFIG_PATH = join(process.cwd(), "config.json");
+const CONFIG_PATH = join(process.cwd(), CONFIG_FILENAME);
 const AGENTS_DIR = join(homedir(), ".agents");
 
 async function prompt(question: string, defaultVal = ""): Promise<string> {
@@ -48,5 +49,5 @@ export async function runInit(useDefaults = false): Promise<void> {
   console.log("Skills 已初始化");
 
   console.log("\n初始化完成！运行 ailo-desktop 启动桌面端点。");
-  console.log(`配置界面: http://127.0.0.1:19801  （可用 --port <端口> 或 CONFIG_PORT=<端口> 指定其他端口）`);
+  console.log("配置界面端口：启动时用 --port <端口> 指定，或运行后在控制台按提示输入。");
 }

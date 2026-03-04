@@ -9,10 +9,8 @@ sdks/
   ailo-endpoint-sdk/       Core SDK — EndpointClient + runEndpoint bootstrap
 
 packages/
-  ailo-feishu/             Lark/Feishu endpoint (WS receive + Open API send)
-  ailo-dingtalk/           DingTalk endpoint (Stream mode + sessionWebhook)
-  ailo-qq/                 QQ endpoint (Bot WS Gateway + REST API)
-  ailo-desktop/            Desktop agent (filesystem, shell, screenshot, browser, email, MCP)
+  ailo-desktop/            Desktop agent（集成 Feishu、钉钉、QQ、邮件、MCP、截图、浏览器等）
+  ailo-clawwork/           Clawwork 评测端点
 
 blueprints/                Blueprint files for each endpoint (tool definitions + usage docs)
 skills/                    Built-in skill definitions (SKILL.md format)
@@ -37,22 +35,14 @@ npm run build
 Each endpoint runs as an independent process. After building, start any endpoint and open its config UI to fill in credentials — no `.env` files needed.
 
 ```bash
-# Feishu / Lark
-cd packages/ailo-feishu && npm start
-# Open http://127.0.0.1:19802 to configure
-
-# DingTalk
-cd packages/ailo-dingtalk && npm start
-# Open http://127.0.0.1:19805 to configure
-
-# QQ
-cd packages/ailo-qq && npm start
-# Open http://127.0.0.1:19806 to configure
-
-# Desktop Agent (includes email endpoint)
+# Desktop Agent（集成 Feishu、钉钉、QQ、邮件、MCP、截图等）
 cd packages/ailo-desktop && npx ailo-desktop init
 npm start
-# Open http://127.0.0.1:19801 to configure
+# 配置界面端口：启动时用 --port <端口> 指定，或运行后按提示输入；访问 http://127.0.0.1:<端口>
+
+# Clawwork 评测端点
+cd packages/ailo-clawwork && npm start
+# Open http://127.0.0.1:19802 to configure
 ```
 
 Each endpoint provides a web-based config UI where you can enter:

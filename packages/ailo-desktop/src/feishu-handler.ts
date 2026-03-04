@@ -31,6 +31,7 @@ import {
   extractTextFromPostContent,
   streamToBuffer,
 } from "./feishu-utils.js";
+import { createChannelLogger, errMsg } from "./utils.js";
 
 export type { FeishuConfig, FeishuAttachment } from "./feishu-types.js";
 
@@ -66,15 +67,7 @@ export class FeishuHandler implements EndpointHandler {
     return this.ctx?.storage ?? null;
   }
 
-  /** 通过 WS 发给 Ailo 代打，ctx 未就绪时回退到 console */
-  private _log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void {
-    if (this.ctx?.log) {
-      this.ctx.log(level, message, data);
-    } else {
-      const fn = level === "error" ? console.error : level === "warn" ? console.warn : level === "debug" ? console.debug : console.log;
-      fn(`[feishu] ${message}`, data ?? "");
-    }
-  }
+  private _log = createChannelLogger("feishu", () => this.ctx);
 
   /** 外部用户数据单 key：{ _counter, [userId]: label } */
   private static readonly EXTERNAL_USERS_KEY = "external_users";
@@ -230,91 +223,85 @@ export class FeishuHandler implements EndpointHandler {
     return null;
   }
 
-  private async getUserInfo(userId: string): Promise<UserInfo | null> {
-    if (!userId) return null;
-
-    const cached = this.userCache.get(userId);
-    if (cached && Date.now() - cached.ts < this.CACHE_TTL) {
-      return cached.value;
-    }
-
+  private async cachedFetch<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    fetcher: () => Promise<T>,
+    fallback: () => T,
+    errorHandler?: (err: unknown) => void,
+  ): Promise<T> {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.ts < this.CACHE_TTL) return cached.value;
     try {
-      const res = await this.client.contact.v3.user.get({
-        path: { user_id: userId },
-        params: { user_id_type: "open_id" },
-      });
-      const user = res.data?.user;
-      const resolvedName = user?.name || user?.en_name || user?.nickname || "";
-      if (!resolvedName) {
-        this._log("warn", `getUserInfo(${userId}): 所有名称字段为空，应用可能缺少 contact:user.base:readonly 权限`);
-      }
-      const info: UserInfo = {
-        name: resolvedName,
-        openId: user?.open_id,
-      };
-
-      this.userCache.set(userId, { value: info, ts: Date.now() });
-
-      return info;
+      const value = await fetcher();
+      cache.set(key, { value, ts: Date.now() });
+      return value;
     } catch (err) {
-      const errCode = this.extractFeishuErrorCode(err);
-
-      if (errCode === 41050) {
-        this._log("info", `getUserInfo(${userId}): 外部用户，无权限获取通讯录信息 (41050)`);
-      } else {
-        const detail = (err as { response?: { data?: unknown }; message?: string })?.response?.data ?? (err as Error).message;
-        this._log("warn", `failed to get user ${userId}`, { detail });
-      }
-
-      let label = this.externalUserLabels.get(userId);
-      if (!label) {
-        this.externalUserCounter++;
-        label = `外部用户${this.externalUserCounter}`;
-        this.externalUserLabels.set(userId, label);
-        this.saveExternalUserLabel(userId, label);
-      }
-      const fallback: UserInfo = { name: label };
-      this.userCache.set(userId, { value: fallback, ts: Date.now() });
-
-      return fallback;
+      errorHandler?.(err);
+      const fb = fallback();
+      cache.set(key, { value: fb, ts: Date.now() });
+      return fb;
     }
+  }
+
+  private async getUserInfo(userId: string): Promise<UserInfo> {
+    return this.cachedFetch(
+      this.userCache,
+      userId,
+      async () => {
+        const res = await this.client.contact.v3.user.get({
+          path: { user_id: userId },
+          params: { user_id_type: "open_id" },
+        });
+        const user = res.data?.user;
+        const resolvedName = user?.name || user?.en_name || user?.nickname || "";
+        if (!resolvedName) {
+          this._log("warn", `getUserInfo(${userId}): 所有名称字段为空，应用可能缺少 contact:user.base:readonly 权限`);
+        }
+        return { name: resolvedName, openId: user?.open_id };
+      },
+      () => {
+        let label = this.externalUserLabels.get(userId);
+        if (!label) {
+          this.externalUserCounter++;
+          label = `外部用户${this.externalUserCounter}`;
+          this.externalUserLabels.set(userId, label);
+          this.saveExternalUserLabel(userId, label);
+        }
+        return { name: label } as UserInfo;
+      },
+      (err) => {
+        const errCode = this.extractFeishuErrorCode(err);
+        if (errCode === 41050) {
+          this._log("info", `getUserInfo(${userId}): 外部用户，无权限获取通讯录信息 (41050)`);
+        } else {
+          const detail = (err as { response?: { data?: unknown }; message?: string })?.response?.data ?? (err as Error).message;
+          this._log("warn", `failed to get user ${userId}`, { detail });
+        }
+      },
+    );
   }
 
   private async getChatInfo(chatId: string): Promise<ChatInfo | null> {
     if (!chatId) return null;
-
-    const cached = this.chatCache.get(chatId);
-    if (cached && Date.now() - cached.ts < this.CACHE_TTL) {
-      return cached.value;
-    }
-
-    try {
-      const res = await this.client.im.v1.chat.get({
-        path: { chat_id: chatId },
-      });
-      const chatData = res.data;
-      const info: ChatInfo = {
-        name: chatData?.name || chatId,
-      };
-
-      this.chatCache.set(chatId, { value: info, ts: Date.now() });
-
-      return info;
-    } catch (err) {
-      const errCode = this.extractFeishuErrorCode(err);
-
-      if (errCode === 41050) {
-        this._log("info", `getChatInfo(${chatId}): 无权限获取群信息 (41050)`);
-      } else {
-        const detail = (err as { response?: { data?: unknown }; message?: string })?.response?.data ?? (err as Error).message;
-        this._log("warn", `failed to get chat ${chatId}`, { detail });
-      }
-
-      const fallback: ChatInfo = { name: chatId };
-      this.chatCache.set(chatId, { value: fallback, ts: Date.now() });
-
-      return fallback;
-    }
+    return this.cachedFetch(
+      this.chatCache,
+      chatId,
+      async () => {
+        const res = await this.client.im.v1.chat.get({ path: { chat_id: chatId } });
+        return { name: res.data?.name || chatId };
+      },
+      () => ({ name: chatId }),
+      (err) => {
+        const errCode = this.extractFeishuErrorCode(err);
+        if (errCode === 41050) {
+          this._log("info", `getChatInfo(${chatId}): 无权限获取群信息 (41050)`);
+        } else {
+          const detail = (err as { response?: { data?: unknown }; message?: string })?.response?.data ?? (err as Error).message;
+          this._log("warn", `failed to get chat ${chatId}`, { detail });
+        }
+      },
+    );
   }
 
   private cleanExpiredCache(): void {

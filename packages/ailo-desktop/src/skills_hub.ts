@@ -4,8 +4,13 @@
  */
 
 import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
+import { join, dirname } from "path";
 import { readConfig } from "@lmcl/ailo-endpoint-sdk";
+import { CONFIG_FILENAME } from "./constants.js";
+
+function loadLocalConfig(): Record<string, unknown> {
+  return readConfig(join(process.cwd(), CONFIG_FILENAME)) as Record<string, unknown>;
+}
 
 export interface SkillBundle {
   name: string;
@@ -15,7 +20,7 @@ export interface SkillBundle {
 
 type Source = "skills_sh" | "clawhub" | "skillsmp" | "github";
 
-export function detectSource(url: string): Source | null {
+function detectSource(url: string): Source | null {
   const u = new URL(url);
   const host = u.hostname.replace("www.", "");
   if (host === "skills.sh") return "skills_sh";
@@ -42,7 +47,7 @@ export async function installFromUrl(url: string, targetDir: string): Promise<Sk
   await writeFile(join(skillDir, "SKILL.md"), bundle.skillMd, "utf-8");
   for (const [relPath, content] of bundle.files) {
     const fullPath = join(skillDir, relPath);
-    await mkdir(join(fullPath, ".."), { recursive: true });
+    await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, content, "utf-8");
   }
   return bundle;
@@ -72,7 +77,7 @@ async function fetchClawhub(url: string): Promise<SkillBundle> {
   const u = new URL(url);
   const slug = u.pathname.split("/").filter(Boolean).pop();
   if (!slug) throw new Error("clawhub URL must contain a slug");
-  const cfg = readConfig(join(process.cwd(), "config.json")) as Record<string, unknown>;
+  const cfg = loadLocalConfig();
   const hubBase = (cfg.skillsHubBaseUrl as string) ?? "https://clawhub.ai";
   const meta = await httpJson(`${hubBase}/api/v1/skills/${slug}`) as any;
   const repoUrl = meta.repo_url ?? meta.github_url;
@@ -188,7 +193,7 @@ function httpJson(url: string): Promise<unknown> {
 async function httpText(url: string): Promise<string> {
   const headers: Record<string, string> = { "User-Agent": "ailo-desktop/1.0" };
   try {
-    const cfg = readConfig(join(process.cwd(), "config.json")) as Record<string, unknown>;
+    const cfg = loadLocalConfig();
     const ghToken = (cfg.githubToken as string) || "";
     if (ghToken && url.includes("api.github.com")) headers.Authorization = `token ${ghToken}`;
   } catch { /* config not available, proceed without token */ }

@@ -16,7 +16,7 @@ tools:
     timeout: 5
 
   - name: read_file
-    description: 按行范围读取本地文件内容（带行号）
+    description: 按行范围读取本地文件内容（带行号）。大文件（>2MB）自动截断，可配合 offset/limit 分页
     timeout: 30
     parameters:
       type: object
@@ -122,23 +122,26 @@ tools:
       required: [source, destination]
 
   - name: execute_code
-    description: 在本地执行 Python 或 JavaScript 代码。立即启动，完成后结果自动推送回来，无需等待或轮询
+    description: 在本地执行 Python 或 JavaScript 代码。立即启动，完成后结果自动推送回来，无需等待或轮询。支持 cwd 指定工作目录，超时（默认 120s）会自动终止
     timeout: 5
     parameters:
       type: object
       properties:
         language: { type: string, enum: [python, javascript], description: "编程语言" }
         code: { type: string, description: "完整可执行的代码，不要加 markdown 代码块标记" }
+        cwd: { type: string, description: "工作目录（可选，默认临时目录）" }
+        timeout: { type: number, description: "超时秒数（5-600，默认 120）" }
       required: [language, code]
 
   - name: exec
-    description: 在本地机器执行 shell 命令。立即启动，完成后结果自动推送回来，无需等待或轮询
+    description: 在本地机器执行 shell 命令。立即启动，完成后结果自动推送回来，无需等待或轮询。超时（默认 120s）会自动终止
     timeout: 5
     parameters:
       type: object
       properties:
         command: { type: string, description: "要执行的命令" }
         cwd: { type: string, description: "工作目录（可选）" }
+        timeout: { type: number, description: "超时秒数（5-600，默认 120）" }
       required: [command]
 
   - name: mcp_manage
@@ -149,7 +152,7 @@ tools:
       properties:
         action: { type: string, enum: [list, create, delete, start, stop], description: "操作类型" }
         name: { type: string, description: "服务名称" }
-        transport: { type: string, enum: [stdio, http], description: "传输方式" }
+        transport: { type: string, enum: [stdio, sse], description: "传输方式（stdio 本地进程 / sse 远程 HTTP）" }
         command: { type: string, description: "stdio 方式的命令（如 npx、uvx）" }
         args: { type: array, items: { type: string }, description: "命令参数" }
         url: { type: string, description: "http 方式的 SSE 端点地址" }

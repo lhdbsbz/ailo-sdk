@@ -9,12 +9,20 @@ import type { AcceptMessage, ContextTag } from "@lmcl/ailo-endpoint-sdk";
 import { textPart, readConfig, writeConfig, getNestedValue, setNestedValue } from "@lmcl/ailo-endpoint-sdk";
 import type { LocalMCPManager } from "./mcp_manager.js";
 import type { SkillsManager } from "./skills_manager.js";
+import { errMsg } from "./utils.js";
 
 /** 网页聊天消息内容项 */
 export type WebchatContentItem =
   | { kind: 'text'; text: string }
   | { kind: 'image'; url: string; name?: string }
   | { kind: 'file'; url: string; name?: string };
+
+function resolveStaticFile(filename: string): string {
+  const base = dirname(fileURLToPath(import.meta.url));
+  const inStatic = join(base, "static", filename);
+  if (existsSync(inStatic)) return inStatic;
+  return join(base, "..", "src", "static", filename);
+}
 
 /** 单项运行环境检测结果 */
 export interface EnvRuntimeItem {
@@ -74,10 +82,7 @@ interface ConfigServerDeps {
 }
 
 function getChatHtmlPath(): string {
-  const base = dirname(fileURLToPath(import.meta.url));
-  const inStatic = join(base, "static", "chat.html");
-  if (existsSync(inStatic)) return inStatic;
-  return join(base, "..", "src", "static", "chat.html");
+  return resolveStaticFile("chat.html");
 }
 
 function serveChatPage(res: ServerResponse, htmlPath: string): void {
@@ -86,9 +91,8 @@ function serveChatPage(res: ServerResponse, htmlPath: string): void {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
     res.writeHead(500);
-    res.end("Failed to load chat page: " + msg);
+    res.end("Failed to load chat page: " + errMsg(e));
   }
 }
 
@@ -270,14 +274,12 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
           if (deps.onRequestReconnect) { await deps.onRequestReconnect(); return json(res, { ok: true, message: "已重连，Skills 已同步" }); }
           return json(res, { ok: false, error: "端点未连接，重连仅在有连接时可用" });
         } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : "重连失败";
-          return json(res, { ok: false, error: msg });
+          return json(res, { ok: false, error: errMsg(e) });
         }
       }
       res.writeHead(404); res.end("Not Found");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      res.writeHead(500); res.end(JSON.stringify({ error: msg }));
+      res.writeHead(500); res.end(JSON.stringify({ error: errMsg(e) }));
     }
   });
 
@@ -434,7 +436,7 @@ async function checkPlaywright(): Promise<EnvRuntimeItem> {
 
 /** 检测 LibreOffice（document-editing / presentation 转 PDF、PPT 预览等可选依赖） */
 function checkLibreOffice(): EnvRuntimeItem {
-  const commands = process.platform === "win32" ? ["soffice", "libreoffice"] : ["soffice", "libreoffice"];
+  const commands = ["soffice", "libreoffice"];
   for (const cmd of commands) {
     const r = spawnSync(cmd, ["--version"], { encoding: "utf-8", timeout: 5000 });
     if (r.status === 0 && (r.stdout || r.stderr || "").trim()) {
@@ -499,8 +501,8 @@ async function runEnvInstall(): Promise<{ installed: string[]; errors: string[] 
   try {
     execSync("npx playwright install chromium", { stdio: "pipe", timeout: 120000, encoding: "utf-8" });
     installed.push("Playwright Chromium");
-  } catch (e: any) {
-    errors.push(`Playwright: ${e?.message || "安装失败"}`);
+  } catch (e: unknown) {
+    errors.push(`Playwright: ${errMsg(e)}`);
   }
   return { installed, errors };
 }
@@ -612,16 +614,16 @@ async function getAllBlueprintsInfo(deps: ConfigServerDeps): Promise<{ name: str
 
 function getMCPList(mgr: LocalMCPManager) {
   const configs = mgr.getConfigs();
-  const servers: any[] = [];
+  const servers: Record<string, unknown>[] = [];
   for (const [name, cfg] of configs) {
-    const transport = (cfg as any).transport ?? "stdio";
+    const c = cfg as Record<string, unknown>;
     servers.push({
       name,
-      transport,
-      command: (cfg as any).command,
-      args: (cfg as any).args,
-      url: (cfg as any).url,
-      enabled: (cfg as any).enabled !== false,
+      transport: c.transport ?? "stdio",
+      command: c.command,
+      args: c.args,
+      url: c.url,
+      enabled: c.enabled !== false,
       running: mgr.isRunning(name),
       tools: mgr.getToolsForServer(name).map((t) => ({ name: t.name, description: t.description })),
     });
@@ -630,35 +632,26 @@ function getMCPList(mgr: LocalMCPManager) {
 }
 
 function serveUI(res: ServerResponse, deps: ConfigServerDeps): void {
-  const base = dirname(fileURLToPath(import.meta.url));
-  const htmlPath = existsSync(join(base, "static", "app.html"))
-    ? join(base, "static", "app.html")
-    : join(base, "..", "src", "static", "app.html");
   try {
-    let html = readFileSync(htmlPath, "utf-8");
+    let html = readFileSync(resolveStaticFile("app.html"), "utf-8");
     html = html.replace(/__SHOW_CONNECTION_FORM__/g, String(!!deps.configPath));
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
     res.writeHead(500);
-    res.end("Failed to load app.html: " + msg);
+    res.end("Failed to load app.html: " + errMsg(e));
   }
 }
 
 function serveStatic(res: ServerResponse, filename: string): void {
-  const base = dirname(fileURLToPath(import.meta.url));
-  const filePath = existsSync(join(base, "static", filename))
-    ? join(base, "static", filename)
-    : join(base, "..", "src", "static", filename);
   const contentType = filename.endsWith(".css")
     ? "text/css; charset=utf-8"
     : "application/javascript; charset=utf-8";
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(resolveStaticFile(filename), "utf-8");
     res.writeHead(200, { "Content-Type": contentType });
     res.end(content);
-  } catch (e: unknown) {
+  } catch {
     res.writeHead(404);
     res.end("Not found: " + filename);
   }
@@ -706,7 +699,7 @@ async function saveConnectionConfig(
     }
     return { ok: true, message: "已保存。" };
   } catch (e: unknown) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errMsg(e) };
   }
 }
 
@@ -751,7 +744,7 @@ async function saveEmailConfig(
     }
     return { ok: true, message: "已保存。" };
   } catch (e: unknown) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errMsg(e) };
   }
 }
 
@@ -793,6 +786,6 @@ async function savePlatformConfig(
     }
     return { ok: true, message: "已保存。" };
   } catch (e: unknown) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errMsg(e) };
   }
 }

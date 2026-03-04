@@ -7,6 +7,7 @@ import {
 } from "@lmcl/ailo-endpoint-sdk";
 import { type QQConfig, type QQMessageEvent, type QQC2CMessageEvent, DEFAULT_API_BASE } from "./qq-types.js";
 import { QQGatewayClient } from "./qq-ws.js";
+import { createChannelLogger, type LogLevel } from "./utils.js";
 
 export type { QQConfig } from "./qq-types.js";
 
@@ -21,14 +22,7 @@ export class QQHandler implements EndpointHandler {
     return (this.config.apiBase ?? DEFAULT_API_BASE).replace(/\/$/, "");
   }
 
-  private _log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void {
-    if (this.ctx?.log) {
-      this.ctx.log(level, message, data);
-    } else {
-      const fn = level === "error" ? console.error : level === "warn" ? console.warn : level === "debug" ? console.debug : console.log;
-      fn(`[qq] ${message}`, data ?? "");
-    }
-  }
+  private _log = createChannelLogger("qq", () => this.ctx);
 
   private acceptMessage(msg: AcceptMessage): void {
     if (!this.ctx) return;
@@ -76,7 +70,7 @@ export class QQHandler implements EndpointHandler {
     const gateway = new QQGatewayClient(
       this.config,
       (event, data) => this.handleDispatch(event, data),
-      (level, msg, d) => this._log(level as any, msg, d),
+      (level, msg, d) => this._log(level as LogLevel, msg, d),
     );
     this.gateway = gateway;
 
@@ -85,102 +79,57 @@ export class QQHandler implements EndpointHandler {
     ctx.reportHealth("connected");
   }
 
-  private handleDispatch(event: string, data: any): void {
+  private handleIncomingMessage(
+    msg: QQMessageEvent | QQC2CMessageEvent,
+    opts: { prefix: string; chatType: "群聊" | "私聊" | "频道"; idField: string; stripAt: boolean },
+  ): void {
+    if ("author" in msg && (msg as QQMessageEvent).author?.bot) return;
+    const text = opts.stripAt ? this.stripAtPrefix(msg.content ?? "") : (msg.content ?? "").trim();
+    if (!text) return;
+
+    const chatId = `${opts.prefix}:${opts.idField}`;
+    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
+    this.acceptMessage(
+      this.buildAcceptMessage({
+        chatId,
+        text,
+        chatType: opts.chatType,
+        senderId: (msg as any).author?.user_openid ?? (msg as any).author?.id ?? "",
+        senderName: (msg as any).author?.username ?? "",
+        msgId: msg.id,
+      }),
+    );
+  }
+
+  private handleDispatch(event: string, data: unknown): void {
     switch (event) {
-      case "AT_MESSAGE_CREATE":
-        this.handleGuildMessage(data as QQMessageEvent);
+      case "AT_MESSAGE_CREATE": {
+        const msg = data as QQMessageEvent;
+        this.handleIncomingMessage(msg, { prefix: "ch", chatType: "频道", idField: msg.channel_id ?? "", stripAt: true });
         break;
+      }
+      case "DIRECT_MESSAGE_CREATE": {
+        const msg = data as QQMessageEvent;
+        this.handleIncomingMessage(msg, { prefix: "dm", chatType: "私聊", idField: msg.guild_id ?? "", stripAt: true });
+        break;
+      }
+      case "C2C_MESSAGE_CREATE": {
+        const msg = data as QQC2CMessageEvent;
+        const userId = msg.author?.user_openid ?? msg.author?.id ?? "";
+        this.handleIncomingMessage(msg, { prefix: "c2c", chatType: "私聊", idField: userId, stripAt: false });
+        break;
+      }
+      case "GROUP_AT_MESSAGE_CREATE": {
+        const msg = data as QQMessageEvent;
+        this.handleIncomingMessage(msg, { prefix: "grp", chatType: "群聊", idField: msg.group_openid ?? msg.group_id ?? "", stripAt: true });
+        break;
+      }
       case "PUBLIC_MESSAGES_DELETE":
         this._log("debug", "ignored message delete event");
-        break;
-      case "DIRECT_MESSAGE_CREATE":
-        this.handleDirectMessage(data as QQMessageEvent);
-        break;
-      case "C2C_MESSAGE_CREATE":
-        this.handleC2CMessage(data as QQC2CMessageEvent);
-        break;
-      case "GROUP_AT_MESSAGE_CREATE":
-        this.handleGroupMessage(data as QQMessageEvent);
         break;
       default:
         this._log("debug", `unhandled event: ${event}`);
     }
-  }
-
-  private handleGuildMessage(msg: QQMessageEvent): void {
-    if (msg.author?.bot) return;
-    const text = this.stripAtPrefix(msg.content ?? "");
-    if (!text) return;
-
-    const chatId = `ch:${msg.channel_id}`;
-    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
-    this.acceptMessage(
-      this.buildAcceptMessage({
-        chatId,
-        text,
-        chatType: "频道",
-        senderId: msg.author?.id ?? "",
-        senderName: msg.author?.username ?? "",
-        msgId: msg.id,
-      }),
-    );
-  }
-
-  private handleDirectMessage(msg: QQMessageEvent): void {
-    if (msg.author?.bot) return;
-    const text = this.stripAtPrefix(msg.content ?? "");
-    if (!text) return;
-
-    const chatId = `dm:${msg.guild_id}`;
-    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
-    this.acceptMessage(
-      this.buildAcceptMessage({
-        chatId,
-        text,
-        chatType: "私聊",
-        senderId: msg.author?.id ?? "",
-        senderName: msg.author?.username ?? "",
-        msgId: msg.id,
-      }),
-    );
-  }
-
-  private handleC2CMessage(msg: QQC2CMessageEvent): void {
-    const text = (msg.content ?? "").trim();
-    if (!text) return;
-
-    const userId = msg.author?.user_openid ?? msg.author?.id ?? "";
-    const chatId = `c2c:${userId}`;
-    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
-    this.acceptMessage(
-      this.buildAcceptMessage({
-        chatId,
-        text,
-        chatType: "私聊",
-        senderId: userId,
-        senderName: msg.author?.username ?? "",
-        msgId: msg.id,
-      }),
-    );
-  }
-
-  private handleGroupMessage(msg: QQMessageEvent): void {
-    if (msg.author?.bot) return;
-    const text = this.stripAtPrefix(msg.content ?? "");
-    if (!text) return;
-
-    const chatId = `grp:${msg.group_openid ?? msg.group_id}`;
-    if (msg.id) this.lastMsgIdByChatId.set(chatId, msg.id);
-    this.acceptMessage(
-      this.buildAcceptMessage({
-        chatId,
-        text,
-        chatType: "群聊",
-        senderId: msg.author?.id ?? "",
-        senderName: msg.author?.username ?? "",
-        msgId: msg.id,
-      }),
-    );
   }
 
   async sendText(chatId: string, text: string, msgId?: string): Promise<void> {

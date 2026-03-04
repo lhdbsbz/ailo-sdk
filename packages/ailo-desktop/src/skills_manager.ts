@@ -14,6 +14,7 @@ const AGENTS_DIR = join(homedir(), ".agents");
 const ACTIVE_DIR = join(AGENTS_DIR, "skills");
 const CUSTOMIZED_DIR = join(AGENTS_DIR, "customized_skills");
 const DISABLED_FILE = join(AGENTS_DIR, "disabled_skills.json");
+const DESCRIPTION_MAX_LEN = 200;
 
 export interface SkillInfo {
   name: string;
@@ -210,7 +211,7 @@ export class SkillsManager {
       }
       if (!description) {
         const firstLine = content.split("\n").find((l) => l.trim() && !l.startsWith("#"));
-        description = firstLine?.trim().slice(0, 200) ?? name;
+        description = firstLine?.trim().slice(0, DESCRIPTION_MAX_LEN) ?? name;
       }
       return { name, description, content };
     } catch {

@@ -29,10 +29,26 @@ if (subcommand === "init") {
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { ContentPart, ToolCapability } from "@lmcl/ailo-endpoint-sdk";
 import { inferMime, classifyMedia, mediaPart } from "@lmcl/ailo-endpoint-sdk";
+import { createInterface } from "readline";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+async function promptPort(): Promise<number> {
+  for (;;) {
+    const n = await new Promise<number | null>((resolve) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl.question("请输入配置界面端口号: ", (answer) => {
+        rl.close();
+        const x = Number(answer.trim());
+        resolve(!Number.isNaN(x) && x > 0 && x < 65536 ? x : null);
+      });
+    });
+    if (n !== null) return n;
+    console.error("无效端口，请输入 1-65535 之间的数字");
+  }
+}
 
 import { takeScreenshot } from "./screenshot.js";
 import { execTool } from "./exec_tool.js";
@@ -55,16 +71,20 @@ import {
   readConfig,
   type AiloConnectionConfig,
 } from "./connection_util.js";
+import { CONFIG_FILENAME, NO_SUBJECT } from "./constants.js";
+import { errMsg } from "./utils.js";
 
 const BLUEPRINTS_DIR = join(__dirname, "..", "..", "..", "blueprints");
 
-function parseArgs(): { port: number; blueprintUrl?: string } {
+function parseArgs(): { port?: number; blueprintUrl?: string } {
   const args = process.argv.slice(2);
-  let port = 19801;
+  let port: number | undefined;
   let blueprintUrl: string | undefined;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--port" && args[i + 1]) port = Number(args[++i]) || 19801;
-    else if (args[i] === "--blueprint-url" && args[i + 1]) blueprintUrl = args[++i];
+    if (args[i] === "--port" && args[i + 1]) {
+      const p = Number(args[++i]);
+      if (!Number.isNaN(p) && p > 0) port = p;
+    } else if (args[i] === "--blueprint-url" && args[i + 1]) blueprintUrl = args[++i];
   }
   return { port, blueprintUrl };
 }
@@ -86,11 +106,20 @@ export interface FeishuConfig { appId: string; appSecret: string }
 export interface DingtalkConfig { clientId: string; clientSecret: string }
 export interface QQConfig { appId: string; appSecret: string; apiBase?: string }
 
-function loadEmailConfig(configPath: string): EmailConfig | null {
+function loadSectionConfig<T>(
+  configPath: string,
+  section: string,
+  requiredKeys: string[],
+  mapper: (raw: Record<string, unknown>) => T,
+): T | null {
   const raw = readConfig(configPath);
-  const e = (raw as Record<string, unknown>).email as Record<string, unknown> | undefined;
-  if (!e?.imapHost || !e?.imapUser || !e?.imapPassword) return null;
-  return {
+  const s = (raw as Record<string, unknown>)[section] as Record<string, unknown> | undefined;
+  if (!s || requiredKeys.some((k) => !s[k])) return null;
+  return mapper(s);
+}
+
+const loadEmailConfig = (p: string) =>
+  loadSectionConfig<EmailConfig>(p, "email", ["imapHost", "imapUser", "imapPassword"], (e) => ({
     imapHost: e.imapHost as string,
     imapPort: Number(e.imapPort) || 993,
     imapUser: e.imapUser as string,
@@ -99,29 +128,26 @@ function loadEmailConfig(configPath: string): EmailConfig | null {
     smtpPort: e.smtpPort ? Number(e.smtpPort) : undefined,
     smtpUser: (e.smtpUser as string) || undefined,
     smtpPassword: (e.smtpPassword as string) || undefined,
-  };
-}
+  }));
 
-function loadFeishuConfig(configPath: string): FeishuConfig | null {
-  const raw = readConfig(configPath);
-  const f = (raw as Record<string, unknown>).feishu as Record<string, unknown> | undefined;
-  if (!f?.appId || !f?.appSecret) return null;
-  return { appId: f.appId as string, appSecret: f.appSecret as string };
-}
+const loadFeishuConfig = (p: string) =>
+  loadSectionConfig<FeishuConfig>(p, "feishu", ["appId", "appSecret"], (f) => ({
+    appId: f.appId as string,
+    appSecret: f.appSecret as string,
+  }));
 
-function loadDingtalkConfig(configPath: string): DingtalkConfig | null {
-  const raw = readConfig(configPath);
-  const d = (raw as Record<string, unknown>).dingtalk as Record<string, unknown> | undefined;
-  if (!d?.clientId || !d?.clientSecret) return null;
-  return { clientId: d.clientId as string, clientSecret: d.clientSecret as string };
-}
+const loadDingtalkConfig = (p: string) =>
+  loadSectionConfig<DingtalkConfig>(p, "dingtalk", ["clientId", "clientSecret"], (d) => ({
+    clientId: d.clientId as string,
+    clientSecret: d.clientSecret as string,
+  }));
 
-function loadQQConfig(configPath: string): QQConfig | null {
-  const raw = readConfig(configPath);
-  const q = (raw as Record<string, unknown>).qq as Record<string, unknown> | undefined;
-  if (!q?.appId || !q?.appSecret) return null;
-  return { appId: q.appId as string, appSecret: q.appSecret as string, apiBase: q.apiBase as string | undefined };
-}
+const loadQQConfig = (p: string) =>
+  loadSectionConfig<QQConfig>(p, "qq", ["appId", "appSecret"], (q) => ({
+    appId: q.appId as string,
+    appSecret: q.appSecret as string,
+    apiBase: q.apiBase as string | undefined,
+  }));
 
 // ──────────────────────────────────────────────────────────────
 // 运行时状态
@@ -166,7 +192,7 @@ async function syncMcpToolsToServer(): Promise<void> {
     lastMcpToolSnapshot = new Map(currentTools.map((t) => [t.name, t]));
     console.log(`[desktop] MCP 工具增量同步: +${register.length} -${unregister.length}`);
   } catch (e: unknown) {
-    console.error("[desktop] MCP 工具增量同步失败:", e instanceof Error ? e.message : e);
+    console.error("[desktop] MCP 工具增量同步失败:", errMsg(e));
   }
 }
 
@@ -179,12 +205,12 @@ async function initSubsystems(): Promise<void> {
       syncMcpToolsToServer();
     });
   } catch (e: unknown) {
-    console.error("[desktop] MCP 初始化失败:", e instanceof Error ? e.message : e);
+    console.error("[desktop] MCP 初始化失败:", errMsg(e));
   }
   try {
     await skillsManager.init();
   } catch (e: unknown) {
-    console.error("[desktop] Skills 初始化失败:", e instanceof Error ? e.message : e);
+    console.error("[desktop] Skills 初始化失败:", errMsg(e));
   }
 }
 
@@ -267,25 +293,15 @@ const FS_TOOLS = [
   "find_files", "search_content", "delete_file", "move_file", "copy_file",
 ];
 
-function requireEmail(): EmailHandler {
-  if (!emailHandler) throw new Error("邮件未配置，请在配置页「邮件」标签中填写 IMAP/SMTP 信息");
-  return emailHandler;
+function requireHandler<T>(handler: T | null, platform: string): T {
+  if (!handler) throw new Error(`${platform}未配置，请在配置页对应标签中填写信息`);
+  return handler;
 }
 
-function requireFeishu(): FeishuHandler {
-  if (!feishuHandler) throw new Error("飞书未配置，请在配置页「飞书」标签中填写应用信息");
-  return feishuHandler;
-}
-
-function requireDingtalk(): DingTalkHandler {
-  if (!dingtalkHandler) throw new Error("钉钉未配置，请在配置页「钉钉」标签中填写应用信息");
-  return dingtalkHandler;
-}
-
-function requireQQ(): QQHandler {
-  if (!qqHandler) throw new Error("QQ 未配置，请在配置页「QQ」标签中填写应用信息");
-  return qqHandler;
-}
+const requireEmail = () => requireHandler(emailHandler, "邮件");
+const requireFeishu = () => requireHandler(feishuHandler, "飞书");
+const requireDingtalk = () => requireHandler(dingtalkHandler, "钉钉");
+const requireQQ = () => requireHandler(qqHandler, "QQ");
 
 function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> {
   const handlers: Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> = {
@@ -436,12 +452,39 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
 // ──────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const port = CLI_PORT;
-  const configPath = join(process.cwd(), "config.json");
+  const port = CLI_PORT ?? (await promptPort());
+  const configPath = join(process.cwd(), CONFIG_FILENAME);
   const connectionState = { connected: false, endpointId: "" };
   let webchatCtxRef: EndpointContext | null = null;
   let connectAttempt = 0;
   let endpointConnecting = false;
+
+  async function reloadPlatformHandler<
+    C,
+    H extends { start(ctx: EndpointContext): Promise<void>; stop(): Promise<void> },
+  >(opts: {
+    getHandler: () => H | null;
+    setHandler: (h: H | null) => void;
+    loadConfig: () => C | null;
+    createHandler: (cfg: C) => H;
+    blueprint: string;
+  }): Promise<void> {
+    if (!endpointCtx) return;
+    const wasRunning = !!opts.getHandler();
+    if (opts.getHandler()) {
+      await opts.getHandler()!.stop();
+      opts.setHandler(null);
+    }
+    const cfg = opts.loadConfig();
+    if (cfg) {
+      const h = opts.createHandler(cfg);
+      opts.setHandler(h);
+      await h.start(endpointCtx);
+      if (!wasRunning) await endpointCtx.update({ register: { blueprints: [opts.blueprint] } });
+    } else if (wasRunning) {
+      await endpointCtx.update({ unregister: { blueprints: [opts.blueprint] } });
+    }
+  }
 
   async function applyConnectionConfig(overrides?: AiloConnectionConfig): Promise<void> {
     const cfg = overrides ?? loadConnectionConfig(configPath);
@@ -486,6 +529,17 @@ async function main(): Promise<void> {
         blueprints,
         tools: mcpManager.getAllPrivateTools(),
         toolHandlers: buildToolHandlers(),
+        onUnknownTool: async (name: string, args: Record<string, unknown>) => {
+          const idx = name.indexOf(":");
+          if (idx > 0) {
+            const serverName = name.slice(0, idx);
+            const toolName = name.slice(idx + 1);
+            if (mcpManager.isRunning(serverName)) {
+              return mcpManager.executeToolCall(serverName, toolName, args);
+            }
+          }
+          return null;
+        },
         skills,
         onConnectFailure: async (err, client) => {
           const delay = backoffDelayMs(connectAttempt++);
@@ -503,7 +557,7 @@ async function main(): Promise<void> {
               endpointId: latest.endpointId,
             });
           } catch (e) {
-            console.error("[desktop] 重试连接失败:", e instanceof Error ? e.message : e);
+            console.error("[desktop] 重试连接失败:", errMsg(e));
           }
         },
       });
@@ -542,90 +596,46 @@ async function main(): Promise<void> {
         await applyConnectionConfig(cfg);
       }
     },
-    onEmailConfigSaved: async () => {
-      if (!endpointCtx) return;
-      const wasRunning = !!emailHandler;
-      if (emailHandler) {
-        await emailHandler.stop();
-        emailHandler = null;
-      }
-      const emailCfg = loadEmailConfig(configPath);
-      if (emailCfg) {
-        emailHandler = new EmailHandler(emailCfg);
-        await emailHandler.start(endpointCtx);
-        if (!wasRunning) {
-          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_EMAIL] } });
-        }
-      } else if (wasRunning) {
-        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_EMAIL] } });
-      }
-    },
+    onEmailConfigSaved: () => reloadPlatformHandler({
+      getHandler: () => emailHandler,
+      setHandler: (h) => { emailHandler = h; },
+      loadConfig: () => loadEmailConfig(configPath),
+      createHandler: (cfg) => new EmailHandler(cfg),
+      blueprint: BLUEPRINT_EMAIL,
+    }),
     getEmailStatus: () => ({
       configured: !!loadEmailConfig(configPath),
       running: emailHandler?.running ?? false,
     }),
-    onFeishuConfigSaved: async () => {
-      if (!endpointCtx) return;
-      const wasRunning = !!feishuHandler;
-      if (feishuHandler) {
-        await feishuHandler.stop();
-        feishuHandler = null;
-      }
-      const feishuCfg = loadFeishuConfig(configPath);
-      if (feishuCfg) {
-        feishuHandler = new FeishuHandler(feishuCfg);
-        await feishuHandler.start(endpointCtx);
-        if (!wasRunning) {
-          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_FEISHU] } });
-        }
-      } else if (wasRunning) {
-        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_FEISHU] } });
-      }
-    },
+    onFeishuConfigSaved: () => reloadPlatformHandler({
+      getHandler: () => feishuHandler,
+      setHandler: (h) => { feishuHandler = h; },
+      loadConfig: () => loadFeishuConfig(configPath),
+      createHandler: (cfg) => new FeishuHandler(cfg),
+      blueprint: BLUEPRINT_FEISHU,
+    }),
     getFeishuStatus: () => ({
       configured: !!loadFeishuConfig(configPath),
       running: !!feishuHandler,
     }),
-    onDingtalkConfigSaved: async () => {
-      if (!endpointCtx) return;
-      const wasRunning = !!dingtalkHandler;
-      if (dingtalkHandler) {
-        await dingtalkHandler.stop();
-        dingtalkHandler = null;
-      }
-      const dingtalkCfg = loadDingtalkConfig(configPath);
-      if (dingtalkCfg) {
-        dingtalkHandler = new DingTalkHandler(dingtalkCfg);
-        await dingtalkHandler.start(endpointCtx);
-        if (!wasRunning) {
-          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_DINGTALK] } });
-        }
-      } else if (wasRunning) {
-        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_DINGTALK] } });
-      }
-    },
+    onDingtalkConfigSaved: () => reloadPlatformHandler({
+      getHandler: () => dingtalkHandler,
+      setHandler: (h) => { dingtalkHandler = h; },
+      loadConfig: () => loadDingtalkConfig(configPath),
+      createHandler: (cfg) => new DingTalkHandler(cfg),
+      blueprint: BLUEPRINT_DINGTALK,
+    }),
     getDingtalkStatus: () => ({
       configured: !!loadDingtalkConfig(configPath),
       running: !!dingtalkHandler,
     }),
-    onQQConfigSaved: async () => {
-      if (!endpointCtx) return;
-      const wasRunning = !!qqHandler;
-      if (qqHandler) {
-        await qqHandler.stop();
-        qqHandler = null;
-      }
-      const qqCfg = loadQQConfig(configPath);
-      if (qqCfg) {
-        qqHandler = new QQHandler(qqCfg);
-        await qqHandler.start(endpointCtx);
-        if (!wasRunning) {
-          await endpointCtx.update({ register: { blueprints: [BLUEPRINT_QQ] } });
-        }
-      } else if (wasRunning) {
-        await endpointCtx.update({ unregister: { blueprints: [BLUEPRINT_QQ] } });
-      }
-    },
+    onQQConfigSaved: () => reloadPlatformHandler({
+      getHandler: () => qqHandler,
+      setHandler: (h) => { qqHandler = h; },
+      loadConfig: () => loadQQConfig(configPath),
+      createHandler: (cfg) => new QQHandler(cfg),
+      blueprint: BLUEPRINT_QQ,
+    }),
     getQQStatus: () => ({
       configured: !!loadQQConfig(configPath),
       running: !!qqHandler,

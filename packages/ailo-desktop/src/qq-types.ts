@@ -25,7 +25,7 @@ export const MAX_RECONNECT_ATTEMPTS = 50;
 
 export interface QQGatewayPayload {
   op: number;
-  d?: any;
+  d?: unknown;
   s?: number;
   t?: string;
 }

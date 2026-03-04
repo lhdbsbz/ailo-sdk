@@ -67,6 +67,8 @@ export interface EndpointConfig {
   tools?: ToolCapability[];
   /** Map of tool name → handler function for automatic tool_request dispatch */
   toolHandlers?: Record<string, ToolHandler>;
+  /** When tool name not in toolHandlers, try this (e.g. for MCP serverName:toolName). Return null to throw unknown tool. */
+  onUnknownTool?: (name: string, args: Record<string, unknown>) => Promise<unknown> | null;
   /** Blueprint IDs to activate for this endpoint session */
   blueprints?: string[];
   /** Override WebSocket URL (default: AILO_WS_URL env var) */
@@ -243,12 +245,19 @@ export function runEndpoint(config: EndpointConfig): void {
 
     // ── tool dispatch with middleware ──
 
-    if (config.toolHandlers) {
-      const handlers = config.toolHandlers;
+    if (config.toolHandlers || config.onUnknownTool) {
+      const handlers = config.toolHandlers ?? {};
+      const onUnknown = config.onUnknownTool;
       client.onToolRequest(async (req) => {
-        const fn = handlers[req.name];
-        if (!fn) throw new Error(`unknown tool: ${req.name}`);
         await resolveFileArgsInPlace(req.args);
+        let fn = handlers[req.name];
+        if (!fn) {
+          if (onUnknown) {
+            const fallback = await onUnknown(req.name, req.args);
+            if (fallback !== null) return fallback;
+          }
+          throw new Error(`unknown tool: ${req.name}`);
+        }
         const result = await fn(req.args);
         if (isContentParts(result)) await autoUploadMedia(result);
         return result;

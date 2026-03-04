@@ -11,6 +11,7 @@ import {
   type DingTalkBotMessage,
   STALE_MESSAGE_THRESHOLD_MS,
 } from "./dingtalk-types.js";
+import { createChannelLogger, errMsg } from "./utils.js";
 
 export type { DingTalkConfig } from "./dingtalk-types.js";
 
@@ -24,14 +25,7 @@ export class DingTalkHandler implements EndpointHandler {
     return this.ctx?.storage ?? null;
   }
 
-  private _log(level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void {
-    if (this.ctx?.log) {
-      this.ctx.log(level, message, data);
-    } else {
-      const fn = level === "error" ? console.error : level === "warn" ? console.warn : level === "debug" ? console.debug : console.log;
-      fn(`[dingtalk] ${message}`, data ?? "");
-    }
-  }
+  private _log = createChannelLogger("dingtalk", () => this.ctx);
 
   private static readonly WEBHOOK_STORE_KEY = "session_webhooks";
 
@@ -159,7 +153,7 @@ export class DingTalkHandler implements EndpointHandler {
           this.buildAcceptMessage({
             chatId,
             text,
-            chatType: isGroup ? "群聊" : "私聊",
+            chatType,
             senderId: msg.senderStaffId,
             senderName: msg.senderNick,
             chatName: isGroup ? (msg.conversationTitle || undefined) : undefined,

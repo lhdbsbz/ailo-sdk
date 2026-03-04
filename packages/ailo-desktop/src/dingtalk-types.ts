@@ -5,7 +5,7 @@ export interface DingTalkConfig {
 
 export interface DingTalkBotMessage {
   conversationId: string;
-  conversationType: string; // "1" = private, "2" = group
+  conversationType: "1" | "2";
   chatbotCorpId?: string;
   chatbotUserId?: string;
   msgId: string;

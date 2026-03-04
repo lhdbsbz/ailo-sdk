@@ -2,6 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { glob } from "glob";
 
+const MAX_SEARCH_RESULTS = 500;
+const MAX_SEARCH_DEPTH = 10;
+const MAX_FIND_RESULTS = 200;
+const IGNORED_DIRS = ["node_modules", ".git"];
+/** 单次 read_file 最大字节数，超出则分块读取并截断提示 */
+const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB
+
 type Args = Record<string, unknown>;
 
 function requireAbsPath(p: string, param: string): string {
@@ -43,12 +50,27 @@ function readFile(args: Args): string {
   const filePath = requireAbsPath(args.path as string, "path");
   if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
 
-  const content = fs.readFileSync(filePath, "utf-8");
-  const lines = content.split("\n");
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile()) throw new Error(`路径不是文件: ${filePath}`);
   const offset = Math.max(0, ((args.offset as number) ?? 1) - 1);
-  const limit = (args.limit as number) ?? lines.length;
-  const slice = lines.slice(offset, offset + limit);
+  const limit = (args.limit as number) ?? undefined;
 
+  let content: string;
+  if (stat.size > MAX_READ_BYTES) {
+    const fd = fs.openSync(filePath, "r");
+    const buf = Buffer.alloc(Math.min(MAX_READ_BYTES, stat.size));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    content = buf.toString("utf-8");
+    if (stat.size > MAX_READ_BYTES) {
+      content += `\n...[文件已截断，共 ${stat.size} 字节，仅显示前 ${MAX_READ_BYTES} 字节。可用 offset/limit 分页读取]`;
+    }
+  } else {
+    content = fs.readFileSync(filePath, "utf-8");
+  }
+
+  const lines = content.split("\n");
+  const slice = limit !== undefined ? lines.slice(offset, offset + limit) : lines.slice(offset);
   return slice.map((line, i) => `${String(offset + i + 1).padStart(6)}|${line}`).join("\n");
 }
 
@@ -110,13 +132,13 @@ function formatSize(bytes: number): string {
 async function findFiles(args: Args): Promise<string> {
   const pattern = args.pattern as string;
   const directory = requireAbsPath((args.directory as string) || process.cwd(), "directory");
-  const maxResults = (args.max_results as number) || 200;
+  const maxResults = (args.max_results as number) || MAX_FIND_RESULTS;
 
   const matches = await glob(pattern, {
     cwd: directory,
     absolute: true,
     nodir: false,
-    ignore: ["**/node_modules/**", "**/.git/**"],
+    ignore: IGNORED_DIRS.map(d => `**/${d}/**`),
   });
 
   const limited = matches.slice(0, maxResults);
@@ -135,12 +157,17 @@ function searchContent(args: Args): string {
   const ignoreCase = (args.ignore_case as boolean) ?? false;
   const contextLines = (args.context_lines as number) ?? 0;
 
-  const pattern = useRegex
-    ? new RegExp(query, ignoreCase ? "gi" : "g")
-    : new RegExp(escapeRegex(query), ignoreCase ? "gi" : "g");
+  let pattern: RegExp;
+  try {
+    pattern = useRegex
+      ? new RegExp(query, ignoreCase ? "gi" : "g")
+      : new RegExp(escapeRegex(query), ignoreCase ? "gi" : "g");
+  } catch {
+    throw new Error(`无效的正则表达式: "${query}"`);
+  }
 
   const results: string[] = [];
-  searchDir(directory, pattern, contextLines, results, 0, 500);
+  searchDir(directory, pattern, contextLines, results, 0, MAX_SEARCH_RESULTS);
   return results.join("\n") || "未找到匹配内容";
 }
 
@@ -149,13 +176,13 @@ function escapeRegex(s: string): string {
 }
 
 function searchDir(dir: string, pattern: RegExp, ctx: number, results: string[], depth: number, limit: number): void {
-  if (depth > 10 || results.length >= limit) return;
+  if (depth > MAX_SEARCH_DEPTH || results.length >= limit) return;
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     if (results.length >= limit) return;
     const full = path.join(dir, e.name);
-    if (e.name === "node_modules" || e.name === ".git") continue;
+    if (IGNORED_DIRS.includes(e.name)) continue;
     if (e.isDirectory()) {
       searchDir(full, pattern, ctx, results, depth + 1, limit);
     } else if (e.isFile()) {
