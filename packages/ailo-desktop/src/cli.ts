@@ -48,5 +48,5 @@ export async function runInit(useDefaults = false): Promise<void> {
   console.log("Skills 已初始化");
 
   console.log("\n初始化完成！运行 ailo-desktop 启动桌面端点。");
-  console.log(`配置界面: http://127.0.0.1:19801`);
+  console.log(`配置界面: http://127.0.0.1:19801  （可用 --port <端口> 或 CONFIG_PORT=<端口> 指定其他端口）`);
 }

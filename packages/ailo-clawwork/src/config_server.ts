@@ -2,18 +2,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import {
   readConfig,
   writeConfig,
-  mergeWithEnv,
-  AILO_ENV_MAPPING,
   getNestedValue,
   setNestedValue,
 } from "./connection_util.js";
-
-const SIDECAR_URL = process.env.CLAWWORK_SIDECAR_URL ?? "http://localhost:8020";
 
 interface ConfigServerDeps {
   getConnectionStatus: () => { connected: boolean; endpointId: string };
   port: number;
   configPath: string;
+  sidecarUrl: string;
   onConnectionConfigSaved?: (config: {
     ailoWsUrl: string;
     ailoApiKey: string;
@@ -37,15 +34,15 @@ export function startConfigServer(deps: ConfigServerDeps): void {
       if (path === "/api/connection" && req.method === "POST") return json(res, await saveConnectionConfig(deps.configPath, await body(req), deps.onConnectionConfigSaved));
       if (path === "/api/clawwork/health") {
         try {
-          const r = await fetch(`${SIDECAR_URL}/health`);
+          const r = await fetch(`${deps.sidecarUrl}/health`);
           return json(res, await r.json());
         } catch {
-          return json(res, { status: "unreachable", error: "Sidecar not running at " + SIDECAR_URL });
+          return json(res, { status: "unreachable", error: "Sidecar not running at " + deps.sidecarUrl });
         }
       }
       if (path === "/api/clawwork/status") {
         try {
-          const r = await fetch(`${SIDECAR_URL}/status`);
+          const r = await fetch(`${deps.sidecarUrl}/status`);
           return json(res, await r.json());
         } catch {
           return json(res, { error: "Sidecar not reachable" });
@@ -53,7 +50,7 @@ export function startConfigServer(deps: ConfigServerDeps): void {
       }
       if (path === "/api/clawwork/leaderboard") {
         try {
-          const r = await fetch(`${SIDECAR_URL}/leaderboard`);
+          const r = await fetch(`${deps.sidecarUrl}/leaderboard`);
           return json(res, await r.json());
         } catch {
           return json(res, { agents: [] });
@@ -61,7 +58,7 @@ export function startConfigServer(deps: ConfigServerDeps): void {
       }
       if (path === "/api/clawwork/evaluations") {
         try {
-          const r = await fetch(`${SIDECAR_URL}/evaluations`);
+          const r = await fetch(`${deps.sidecarUrl}/evaluations`);
           return json(res, await r.json());
         } catch {
           return json(res, { evaluations: [], total: 0 });
@@ -69,7 +66,7 @@ export function startConfigServer(deps: ConfigServerDeps): void {
       }
       if (path === "/api/clawwork/current-task") {
         try {
-          const r = await fetch(`${SIDECAR_URL}/current-task`);
+          const r = await fetch(`${deps.sidecarUrl}/current-task`);
           return json(res, await r.json());
         } catch {
           return json(res, { active: false, task: null });
@@ -105,10 +102,9 @@ async function body(req: IncomingMessage): Promise<string> {
 
 function getConnectionConfig(configPath: string) {
   const cfg = readConfig(configPath);
-  const { merged } = mergeWithEnv(cfg, AILO_ENV_MAPPING);
-  const url = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
-  const key = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
-  const id = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
+  const url = (getNestedValue(cfg as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+  const key = (getNestedValue(cfg as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+  const id = (getNestedValue(cfg as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
   return {
     configured: !!(url && key && id),
     ailoWsUrl: url || undefined,
@@ -129,10 +125,9 @@ async function saveConnectionConfig(
     if (b.ailoApiKey !== undefined) setNestedValue(existing, "ailo.apiKey", b.ailoApiKey);
     if (b.endpointId !== undefined) setNestedValue(existing, "ailo.endpointId", b.endpointId);
     writeConfig(configPath, existing);
-    const { merged } = mergeWithEnv(existing, AILO_ENV_MAPPING);
-    const ailoWsUrl = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
-    const ailoApiKey = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
-    const endpointId = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
+    const ailoWsUrl = (getNestedValue(existing as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+    const ailoApiKey = (getNestedValue(existing as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+    const endpointId = (getNestedValue(existing as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
     if (onSaved && ailoWsUrl && ailoApiKey && endpointId) {
       await onSaved({ ailoWsUrl, ailoApiKey, endpointId });
       return { ok: true, message: "已保存，正在使用新配置连接…" };

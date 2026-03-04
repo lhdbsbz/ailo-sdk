@@ -6,10 +6,15 @@ import { spawnSync } from "child_process";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { EndpointContext } from "@lmcl/ailo-endpoint-sdk";
 import type { AcceptMessage, ContextTag } from "@lmcl/ailo-endpoint-sdk";
-import { textPart, readConfig, writeConfig, mergeWithEnv, AILO_ENV_MAPPING, getNestedValue, setNestedValue } from "@lmcl/ailo-endpoint-sdk";
-import type { EnvMapping } from "@lmcl/ailo-endpoint-sdk";
+import { textPart, readConfig, writeConfig, getNestedValue, setNestedValue } from "@lmcl/ailo-endpoint-sdk";
 import type { LocalMCPManager } from "./mcp_manager.js";
 import type { SkillsManager } from "./skills_manager.js";
+
+/** 网页聊天消息内容项 */
+export type WebchatContentItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; url: string; name?: string }
+  | { kind: 'file'; url: string; name?: string };
 
 /** 单项运行环境检测结果 */
 export interface EnvRuntimeItem {
@@ -412,7 +417,7 @@ async function checkPlaywright(): Promise<EnvRuntimeItem> {
         canAutoInstall: true,
       };
     }
-  } catch {}
+  } catch { }
   return {
     id: "playwright",
     name: "Playwright Chromium",
@@ -631,7 +636,7 @@ function serveUI(res: ServerResponse, deps: ConfigServerDeps): void {
   try {
     let html = readFileSync(htmlPath, "utf-8");
     html = html.replace(/__SHOW_CONNECTION_FORM__/g, String(!!deps.configPath));
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -665,10 +670,9 @@ function getConnectionConfig(configPath: string): {
   endpointId?: string;
 } {
   const cfg = readConfig(configPath);
-  const { merged } = mergeWithEnv(cfg, AILO_ENV_MAPPING);
-  const url = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
-  const key = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
-  const id = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
+  const url = (getNestedValue(cfg as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+  const key = (getNestedValue(cfg as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+  const id = (getNestedValue(cfg as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
   const configured = !!(url && key && id);
   return {
     configured,
@@ -692,10 +696,9 @@ async function saveConnectionConfig(
     if (b.ailoApiKey !== undefined) setNestedValue(existing, "ailo.apiKey", b.ailoApiKey);
     if (b.endpointId !== undefined) setNestedValue(existing, "ailo.endpointId", b.endpointId);
     writeConfig(configPath, existing);
-    const { merged } = mergeWithEnv(existing, AILO_ENV_MAPPING);
-    const ailoWsUrl = (getNestedValue(merged as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
-    const ailoApiKey = (getNestedValue(merged as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
-    const endpointId = (getNestedValue(merged as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
+    const ailoWsUrl = (getNestedValue(existing as Record<string, unknown>, "ailo.wsUrl") as string) ?? "";
+    const ailoApiKey = (getNestedValue(existing as Record<string, unknown>, "ailo.apiKey") as string) ?? "";
+    const endpointId = (getNestedValue(existing as Record<string, unknown>, "ailo.endpointId") as string) ?? "";
     if (onSaved && ailoWsUrl && ailoApiKey && endpointId) {
       await onSaved({ ailoWsUrl, ailoApiKey, endpointId });
       return { ok: true, message: "已保存，正在使用新配置重连…" };

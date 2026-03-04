@@ -23,9 +23,19 @@ import {
   type AiloConnectionConfig,
 } from "./connection_util.js";
 
-const SIDECAR_URL = process.env.CLAWWORK_SIDECAR_URL ?? "http://localhost:8020";
+function parseArgs(): { port: number; sidecarUrl: string } {
+  const args = process.argv.slice(2);
+  let port = 19802;
+  let sidecarUrl = "http://localhost:8020";
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--port" && args[i + 1]) port = Number(args[++i]) || 19802;
+    else if (args[i] === "--sidecar-url" && args[i + 1]) sidecarUrl = args[++i];
+  }
+  return { port, sidecarUrl };
+}
+
+const { port: CONFIG_PORT, sidecarUrl: SIDECAR_URL } = parseArgs();
 const BLUEPRINT = join(__dirname, "..", "blueprints", "clawwork.blueprint.md");
-const CONFIG_PORT = Number(process.env.CONFIG_PORT ?? 19802) || 19802;
 const configPath = join(process.cwd(), "config.json");
 
 // ── Sidecar HTTP helpers ────────────────────────────────────────────────────
@@ -225,6 +235,7 @@ async function main(): Promise<void> {
     getConnectionStatus: () => connectionState,
     port: CONFIG_PORT,
     configPath,
+    sidecarUrl: SIDECAR_URL,
     onConnectionConfigSaved: async (config) => {
       const cfg: AiloConnectionConfig = {
         url: config.ailoWsUrl,

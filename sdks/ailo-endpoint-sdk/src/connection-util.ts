@@ -23,10 +23,3 @@ export function backoffDelayMs(
   const spread = raw * 0.1 * (Math.random() * 2 - 1);
   return Math.max(100, Math.round(raw + spread));
 }
-
-/** Standard env mapping for the common ailo connection fields. */
-export const AILO_ENV_MAPPING = [
-  { envVar: "AILO_WS_URL", configPath: "ailo.wsUrl" },
-  { envVar: "AILO_API_KEY", configPath: "ailo.apiKey" },
-  { envVar: "AILO_ENDPOINT_ID", configPath: "ailo.endpointId" },
-];

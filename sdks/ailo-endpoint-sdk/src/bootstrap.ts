@@ -92,15 +92,15 @@ export interface EndpointConfig {
 export function runEndpoint(config: EndpointConfig): void {
   const { handler } = config;
 
-  const ailoWsUrl = config.ailoWsUrl ?? process.env.AILO_WS_URL ?? "";
-  const ailoApiKey = config.ailoApiKey ?? process.env.AILO_API_KEY ?? "";
-  const endpointId = config.endpointId ?? process.env.AILO_ENDPOINT_ID ?? "";
+  const ailoWsUrl = config.ailoWsUrl ?? "";
+  const ailoApiKey = config.ailoApiKey ?? "";
+  const endpointId = config.endpointId ?? "";
   const caps = config.caps ?? ["message", "tool_execute"];
 
   if (!ailoWsUrl || !ailoApiKey || !endpointId) {
     console.error(
-      "[endpoint] Missing AILO_WS_URL, AILO_API_KEY or AILO_ENDPOINT_ID. " +
-      "Endpoint must be launched by Ailo or have these env vars configured.",
+      "[endpoint] Missing ailoWsUrl, ailoApiKey or endpointId. " +
+      "Please pass these values in the config or set them via the config file.",
     );
     process.exit(1);
   }

@@ -241,5 +241,5 @@ export type HealthStatus = "connected" | "reconnecting" | "error";
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 export function getWorkDir(): string | null {
-  return process.env.AILO_MCP_WORKDIR || null;
+  return null;
 }

@@ -4,20 +4,16 @@
  * Provides a web UI + REST API for configuring any endpoint:
  *  - Ailo connection fields (common to all endpoints)
  *  - Platform-specific fields (declared via platformFields)
- *  - Reads/writes config.json, merges with env vars
- *  - Env-overridden fields shown as readonly in the UI
+ *  - Reads/writes config.json only; no environment variable overrides
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
-import { readConfig, writeConfig, mergeWithEnv, getNestedValue, setNestedValue } from "./config-io.js";
-import { AILO_ENV_MAPPING } from "./connection-util.js";
-import type { EnvMapping } from "./config-io.js";
+import { readConfig, writeConfig, getNestedValue, setNestedValue } from "./config-io.js";
 
 export interface ConfigField {
   key: string;
   label: string;
-  envVar?: string;
   type?: "text" | "password" | "number";
   placeholder?: string;
   required?: boolean;
@@ -28,7 +24,6 @@ export interface EndpointConfigServerOptions {
   defaultPort: number;
   configPath?: string;
   platformFields: ConfigField[];
-  envMapping?: EnvMapping[];
   getConnectionStatus: () => { connected: boolean; endpointId: string };
   onConfigSaved?: (config: Record<string, unknown>) => Promise<void>;
 }
@@ -61,13 +56,13 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-function buildEnvMapping(platformFields: ConfigField[], extra?: EnvMapping[]): EnvMapping[] {
-  const mapping = [...AILO_ENV_MAPPING];
-  for (const f of platformFields) {
-    if (f.envVar) mapping.push({ envVar: f.envVar, configPath: f.key });
-  }
-  if (extra) mapping.push(...extra);
-  return mapping;
+function buildAllFields(platformFields: ConfigField[]): ConfigField[] {
+  const ailoFields: ConfigField[] = [
+    { key: "ailo.wsUrl", label: "WS URL", placeholder: "ws://127.0.0.1:19800/ws", required: true },
+    { key: "ailo.apiKey", label: "API Key", placeholder: "ailo_ep_xxx", required: true },
+    { key: "ailo.endpointId", label: "Endpoint ID", required: true },
+  ];
+  return [...platformFields, ...ailoFields];
 }
 
 export function startEndpointConfigServer(options: EndpointConfigServerOptions): void {
@@ -79,11 +74,11 @@ export function startEndpointConfigServer(options: EndpointConfigServerOptions):
     onConfigSaved,
   } = options;
   const configPath = options.configPath ?? join(process.cwd(), "config.json");
-  const envMapping = buildEnvMapping(platformFields, options.envMapping);
 
-  function loadMergedConfig(): { merged: Record<string, unknown>; envOverrides: Set<string> } {
-    const raw = readConfig(configPath);
-    return mergeWithEnv(raw, envMapping);
+  const allFields = buildAllFields(platformFields);
+
+  function loadConfig(): Record<string, unknown> {
+    return readConfig(configPath) as Record<string, unknown>;
   }
 
   const server = createServer(async (req, res) => {
@@ -108,8 +103,8 @@ export function startEndpointConfigServer(options: EndpointConfigServerOptions):
         return json(res, status);
       }
       if (path === "/api/config" && req.method === "GET") {
-        const { merged, envOverrides } = loadMergedConfig();
-        return json(res, { config: merged, envOverrides: Array.from(envOverrides) });
+        const config = loadConfig();
+        return json(res, { config, envOverrides: [] });
       }
       if (path === "/api/config" && req.method === "POST") {
         try {
@@ -119,10 +114,10 @@ export function startEndpointConfigServer(options: EndpointConfigServerOptions):
           const existing = readConfig(configPath);
           const result = JSON.parse(JSON.stringify(existing)) as Record<string, unknown>;
 
-          for (const m of envMapping) {
-            const val = getNestedValue(incoming as Record<string, unknown>, m.configPath);
+          for (const f of allFields) {
+            const val = getNestedValue(incoming as Record<string, unknown>, f.key);
             if (val !== undefined) {
-              setNestedValue(result, m.configPath, val);
+              setNestedValue(result, f.key, val);
             }
           }
 
@@ -130,8 +125,7 @@ export function startEndpointConfigServer(options: EndpointConfigServerOptions):
 
           if (onConfigSaved) {
             try {
-              const { merged } = mergeWithEnv(result, envMapping);
-              await onConfigSaved(merged);
+              await onConfigSaved(result);
             } catch (e: unknown) {
               const msg = e instanceof Error ? e.message : String(e);
               return json(res, { ok: true, message: `已保存。重连时出错：${msg}` });
@@ -176,17 +170,16 @@ function buildFieldHTML(f: ConfigField): string {
   const id = fieldId(f.key);
   const inputType = f.type === "number" ? "number" : "text";
   const ph = esc(f.placeholder ?? "");
-  const envHint = f.envVar ? ` <span class="env-badge" id="env_${id}" style="display:none">由 ${esc(f.envVar)} 设置</span>` : "";
-  return `    <div class="form-group"><label>${esc(f.label)}${f.required ? " *" : ""}${envHint}</label><input id="${id}" type="${inputType}" placeholder="${ph}" autocomplete="off"></div>`;
+  return `    <div class="form-group"><label>${esc(f.label)}${f.required ? " *" : ""}</label><input id="${id}" type="${inputType}" placeholder="${ph}" autocomplete="off"></div>`;
 }
 
 function buildUIHTML(endpointName: string, platformFields: ConfigField[]): string {
   const platformFormHTML = platformFields.map(f => buildFieldHTML(f)).join("\n");
 
   const ailoFields: ConfigField[] = [
-    { key: "ailo.wsUrl", label: "AILO_WS_URL", envVar: "AILO_WS_URL", placeholder: "ws://127.0.0.1:19800/ws", required: true },
-    { key: "ailo.apiKey", label: "AILO_API_KEY", envVar: "AILO_API_KEY", placeholder: "ailo_ep_xxx", required: true },
-    { key: "ailo.endpointId", label: "AILO_ENDPOINT_ID", envVar: "AILO_ENDPOINT_ID", placeholder: endpointName.toLowerCase() + "-01", required: true },
+    { key: "ailo.wsUrl", label: "WS URL", placeholder: "ws://127.0.0.1:19800/ws", required: true },
+    { key: "ailo.apiKey", label: "API Key", placeholder: "ailo_ep_xxx", required: true },
+    { key: "ailo.endpointId", label: "Endpoint ID", placeholder: endpointName.toLowerCase() + "-01", required: true },
   ];
   const ailoFormHTML = ailoFields.map(f => buildFieldHTML(f)).join("\n");
 
@@ -226,7 +219,6 @@ input[readonly]{opacity:.6;cursor:not-allowed}
 .info-row{display:flex;gap:24px;margin-bottom:8px;font-size:15px}
 .info-label{color:#9ca3af;min-width:100px}
 .info-value{color:#d4d6da}
-.env-badge{font-size:12px;color:#fbbf24;background:#3730501a;padding:2px 8px;border-radius:4px;margin-left:6px}
 </style>
 </head>
 <body>
@@ -266,24 +258,16 @@ function showStatus(data){
   else{dot.className='dot off';st.textContent='未连接';info.innerHTML='<div class="info-row"><span class="info-value">尚未连接 Ailo。请填写下方配置并保存。</span></div>'}
 }
 function getVal(path,obj){var p=path.split('.');var c=obj;for(var i=0;i<p.length;i++){if(c==null)return '';c=c[p[i]]}return c==null?'':c}
-function fillForm(cfg,envOverrides){
+function fillForm(cfg){
   for(var i=0;i<FIELD_KEYS.length;i++){
     var e=el(FIELD_IDS[i]);if(!e)continue;
     e.value=getVal(FIELD_KEYS[i],cfg)||'';
-    var badge=el('env_'+FIELD_IDS[i]);
-    if(envOverrides.indexOf(FIELD_KEYS[i])>=0){
-      e.readOnly=true;e.title='由环境变量设置，不可在此修改';
-      if(badge)badge.style.display='inline';
-    }else{
-      e.readOnly=false;e.title='';
-      if(badge)badge.style.display='none';
-    }
   }
 }
 function collectForm(){
   var obj={};
   for(var i=0;i<FIELD_KEYS.length;i++){
-    var e=el(FIELD_IDS[i]);if(!e||e.readOnly)continue;
+    var e=el(FIELD_IDS[i]);if(!e)continue;
     var p=FIELD_KEYS[i].split('.');var c=obj;
     for(var j=0;j<p.length-1;j++){if(!c[p[j]])c[p[j]]={};c=c[p[j]]}
     c[p[p.length-1]]=e.value.trim();
@@ -296,7 +280,7 @@ async function load(){
     var [sr,cr]=await Promise.all([fetch('/api/status'),fetch('/api/config')]);
     if(!sr.ok||!cr.ok)throw new Error('请求失败');
     showStatus(await sr.json());
-    var cd=await cr.json();fillForm(cd.config||{},cd.envOverrides||[]);
+    var cd=await cr.json();fillForm(cd.config||{});
   }catch(e){
     var info=el('statusInfo');if(info)info.innerHTML='<div class="info-row"><span class="info-value" style="color:#f87171">加载失败，请刷新页面</span></div>';
   }

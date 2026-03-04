@@ -58,16 +58,13 @@ export { inferMime, classifyMedia } from "./media-util.js";
 export {
   readConfig,
   writeConfig,
-  mergeWithEnv,
   getNestedValue,
   setNestedValue,
 } from "./config-io.js";
-export type { EnvMapping } from "./config-io.js";
 
 export {
   hasValidConfig,
   backoffDelayMs,
-  AILO_ENV_MAPPING,
 } from "./connection-util.js";
 export type { AiloConnectionConfig } from "./connection-util.js";
 

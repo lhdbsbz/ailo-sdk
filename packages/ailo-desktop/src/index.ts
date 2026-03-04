@@ -53,14 +53,25 @@ import {
   hasValidConfig,
   backoffDelayMs,
   readConfig,
-  mergeWithEnv,
   type AiloConnectionConfig,
 } from "./connection_util.js";
 
 const BLUEPRINTS_DIR = join(__dirname, "..", "..", "..", "blueprints");
-const BLUEPRINT_URL =
-  process.env.BLUEPRINT_DESKTOP_URL ??
-  join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md");
+
+function parseArgs(): { port: number; blueprintUrl?: string } {
+  const args = process.argv.slice(2);
+  let port = 19801;
+  let blueprintUrl: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--port" && args[i + 1]) port = Number(args[++i]) || 19801;
+    else if (args[i] === "--blueprint-url" && args[i + 1]) blueprintUrl = args[++i];
+  }
+  return { port, blueprintUrl };
+}
+
+const { port: CLI_PORT, blueprintUrl: CLI_BLUEPRINT_URL } = parseArgs();
+
+const BLUEPRINT_URL = CLI_BLUEPRINT_URL ?? join(BLUEPRINTS_DIR, "desktop-agent.blueprint.md");
 const BLUEPRINT_WEBCHAT = join(BLUEPRINTS_DIR, "webchat.blueprint.md");
 const BLUEPRINT_EMAIL = join(BLUEPRINTS_DIR, "email.blueprint.md");
 const BLUEPRINT_FEISHU = join(BLUEPRINTS_DIR, "feishu.blueprint.md");
@@ -71,41 +82,13 @@ const BLUEPRINT_QQ = join(BLUEPRINTS_DIR, "qq.blueprint.md");
 // 配置加载：各平台 + email
 // ──────────────────────────────────────────────────────────────
 
-const EMAIL_ENV_MAPPING = [
-  { envVar: "IMAP_HOST", configPath: "email.imapHost" },
-  { envVar: "IMAP_USER", configPath: "email.imapUser" },
-  { envVar: "IMAP_PASSWORD", configPath: "email.imapPassword" },
-  { envVar: "IMAP_PORT", configPath: "email.imapPort" },
-  { envVar: "SMTP_HOST", configPath: "email.smtpHost" },
-  { envVar: "SMTP_PORT", configPath: "email.smtpPort" },
-  { envVar: "SMTP_USER", configPath: "email.smtpUser" },
-  { envVar: "SMTP_PASSWORD", configPath: "email.smtpPassword" },
-] as const;
-
-const FEISHU_ENV_MAPPING = [
-  { envVar: "FEISHU_APP_ID", configPath: "feishu.appId" },
-  { envVar: "FEISHU_APP_SECRET", configPath: "feishu.appSecret" },
-] as const;
-
-const DINGTALK_ENV_MAPPING = [
-  { envVar: "DINGTALK_CLIENT_ID", configPath: "dingtalk.clientId" },
-  { envVar: "DINGTALK_CLIENT_SECRET", configPath: "dingtalk.clientSecret" },
-] as const;
-
-const QQ_ENV_MAPPING = [
-  { envVar: "QQ_APP_ID", configPath: "qq.appId" },
-  { envVar: "QQ_APP_SECRET", configPath: "qq.appSecret" },
-  { envVar: "QQ_API_BASE", configPath: "qq.apiBase" },
-] as const;
-
 export interface FeishuConfig { appId: string; appSecret: string }
 export interface DingtalkConfig { clientId: string; clientSecret: string }
 export interface QQConfig { appId: string; appSecret: string; apiBase?: string }
 
 function loadEmailConfig(configPath: string): EmailConfig | null {
   const raw = readConfig(configPath);
-  const { merged } = mergeWithEnv(raw, EMAIL_ENV_MAPPING as any);
-  const e = (merged as Record<string, unknown>).email as Record<string, unknown> | undefined;
+  const e = (raw as Record<string, unknown>).email as Record<string, unknown> | undefined;
   if (!e?.imapHost || !e?.imapUser || !e?.imapPassword) return null;
   return {
     imapHost: e.imapHost as string,
@@ -121,24 +104,21 @@ function loadEmailConfig(configPath: string): EmailConfig | null {
 
 function loadFeishuConfig(configPath: string): FeishuConfig | null {
   const raw = readConfig(configPath);
-  const { merged } = mergeWithEnv(raw, FEISHU_ENV_MAPPING as any);
-  const f = (merged as Record<string, unknown>).feishu as Record<string, unknown> | undefined;
+  const f = (raw as Record<string, unknown>).feishu as Record<string, unknown> | undefined;
   if (!f?.appId || !f?.appSecret) return null;
   return { appId: f.appId as string, appSecret: f.appSecret as string };
 }
 
 function loadDingtalkConfig(configPath: string): DingtalkConfig | null {
   const raw = readConfig(configPath);
-  const { merged } = mergeWithEnv(raw, DINGTALK_ENV_MAPPING as any);
-  const d = (merged as Record<string, unknown>).dingtalk as Record<string, unknown> | undefined;
+  const d = (raw as Record<string, unknown>).dingtalk as Record<string, unknown> | undefined;
   if (!d?.clientId || !d?.clientSecret) return null;
   return { clientId: d.clientId as string, clientSecret: d.clientSecret as string };
 }
 
 function loadQQConfig(configPath: string): QQConfig | null {
   const raw = readConfig(configPath);
-  const { merged } = mergeWithEnv(raw, QQ_ENV_MAPPING as any);
-  const q = (merged as Record<string, unknown>).qq as Record<string, unknown> | undefined;
+  const q = (raw as Record<string, unknown>).qq as Record<string, unknown> | undefined;
   if (!q?.appId || !q?.appSecret) return null;
   return { appId: q.appId as string, appSecret: q.appSecret as string, apiBase: q.apiBase as string | undefined };
 }
@@ -456,9 +436,8 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
 // ──────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const port = Number(process.env.CONFIG_PORT ?? 19801) || 19801;
+  const port = CLI_PORT;
   const configPath = join(process.cwd(), "config.json");
-
   const connectionState = { connected: false, endpointId: "" };
   let webchatCtxRef: EndpointContext | null = null;
   let connectAttempt = 0;
