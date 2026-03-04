@@ -30,14 +30,23 @@ async function doRun(args: Args): Promise<string> {
   const timeout = ((args.timeout as number) ?? 30) * 1000;
 
   return new Promise((resolve) => {
-    const shell = os.platform() === "win32" ? "powershell" : "/bin/sh";
-    const shellArgs = os.platform() === "win32" ? ["-Command", command] : ["-c", command];
+    const isWin = os.platform() === "win32";
+    const shell = isWin ? "powershell" : "/bin/sh";
+    const wrappedCommand = isWin
+      ? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+      : command;
+    const shellArgs = isWin ? ["-Command", wrappedCommand] : ["-c", command];
     const cwd = (args.cwd as string) || undefined;
-    const proc = spawn(shell, shellArgs, { stdio: ["pipe", "pipe", "pipe"], cwd });
+    const env = {
+      ...process.env,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+    };
+    const proc = spawn(shell, shellArgs, { stdio: ["pipe", "pipe", "pipe"], cwd, env });
 
     const output: string[] = [];
-    proc.stdout?.on("data", (d: Buffer) => output.push(d.toString()));
-    proc.stderr?.on("data", (d: Buffer) => output.push(d.toString()));
+    proc.stdout?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
+    proc.stderr?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
 
     let finished = false;
 

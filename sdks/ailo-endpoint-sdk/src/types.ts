@@ -202,6 +202,25 @@ export type FsProbeResponse = {
   found: boolean;
 };
 
+// ─── Incremental capability update ────────────────────────────────────────────
+
+/** Parameters for endpoint.update — incremental register/unregister of capabilities */
+export type EndpointUpdateParams = {
+  register?: {
+    tools?: ToolCapability[];
+    blueprints?: string[];
+    skills?: SkillMeta[];
+    caps?: string[];
+    instructions?: string;
+  };
+  unregister?: {
+    tools?: string[];
+    blueprints?: string[];
+    skills?: string[];
+    caps?: string[];
+  };
+};
+
 // ─── Tool handler ─────────────────────────────────────────────────────────────
 
 /** Tool handler return type: ContentPart[] for multimodal results, or any other value for legacy text results. */

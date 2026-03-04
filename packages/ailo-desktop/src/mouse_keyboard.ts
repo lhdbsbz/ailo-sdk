@@ -52,7 +52,7 @@ function mouseMove(x: number, y: number): void {
   const platform = os.platform();
   if (platform === "win32") {
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x},${y})`;
-    execSync(`powershell -Command "${ps}"`);
+    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["m:" + x + "," + y]);
   } else {
@@ -76,7 +76,7 @@ function mouseClick(x: number, y: number, button: string = "left"): void {
       `$m::mouse_event(${downFlag},0,0,0,0)`,
       `$m::mouse_event(${upFlag},0,0,0,0)`,
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`);
+    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     const clickCmd = button === "right" ? "rc" : "c";
     spawnSync("cliclick", [clickCmd + ":" + x + "," + y]);
@@ -101,7 +101,7 @@ function mouseDoubleClick(x: number, y: number): void {
       "Start-Sleep -Milliseconds 50",
       "$m::mouse_event(0x0002,0,0,0,0); $m::mouse_event(0x0004,0,0,0,0)",
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`);
+    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["dc:" + x + "," + y]);
   } else {
@@ -126,7 +126,7 @@ function mouseDrag(sx: number, sy: number, ex: number, ey: number): void {
       "Start-Sleep -Milliseconds 50",
       "$m::mouse_event(0x0004,0,0,0,0)",
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`);
+    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["dd:" + sx + "," + sy, "dm:" + ex + "," + ey, "du:" + ex + "," + ey]);
   } else {
@@ -139,7 +139,7 @@ function keyboardType(text: string): void {
   if (platform === "win32") {
     const escaped = text.replace(/'/g, "''");
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`;
-    execSync(`powershell -Command "${ps}"`);
+    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["t:" + text]);
   } else {
@@ -168,7 +168,7 @@ function keyboardHotkey(keys: string): void {
       sendKeysStr += map[lower] ?? k;
     }
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${sendKeysStr}')`;
-    execSync(`powershell -Command "${ps}"`);
+    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     const macKeys = keyNames.map(k => {
       const map: Record<string, string> = { ctrl: "cmd", control: "cmd", alt: "alt", shift: "shift", meta: "cmd", cmd: "cmd" };
@@ -191,7 +191,7 @@ function mouseScroll(direction: string, amount: number): void {
       "$m = Add-Type -MemberDefinition $sig -Name WinMouse4 -Namespace Win32 -PassThru",
       `$m::mouse_event(0x0800,0,0,${delta},0)`,
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`);
+    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
   } else if (platform === "darwin") {
     const scrollAmount = direction === "up" ? amount : -amount;
     spawnSync("cliclick", ["w:" + scrollAmount]);

@@ -26,7 +26,7 @@ if (subcommand === "init") {
     });
 }
 import { runEndpoint, type EndpointContext } from "@lmcl/ailo-endpoint-sdk";
-import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
+import type { ContentPart, ToolCapability } from "@lmcl/ailo-endpoint-sdk";
 import { inferMime, classifyMedia, mediaPart } from "@lmcl/ailo-endpoint-sdk";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -76,12 +76,49 @@ const skillsManager = new SkillsManager();
 let endpointCtx: EndpointContext | null = null;
 let webchatApi: { recordAiloReply: (text: string, participantName: string) => boolean } | null = null;
 let emailHandler: EmailHandler | null = null;
+let lastMcpToolSnapshot: Map<string, ToolCapability> = new Map();
+
+function computeToolDiff(oldTools: Map<string, ToolCapability>, newTools: ToolCapability[]): {
+  register: ToolCapability[];
+  unregister: string[];
+} {
+  const newMap = new Map(newTools.map((t) => [t.name, t]));
+  const register: ToolCapability[] = [];
+  const unregister: string[] = [];
+  for (const [name] of oldTools) {
+    if (!newMap.has(name)) unregister.push(name);
+  }
+  for (const [name, tool] of newMap) {
+    if (!oldTools.has(name)) register.push(tool);
+  }
+  return { register, unregister };
+}
+
+async function syncMcpToolsToServer(): Promise<void> {
+  if (!endpointCtx) return;
+  const currentTools = mcpManager.getAllPrivateTools();
+  const { register, unregister } = computeToolDiff(lastMcpToolSnapshot, currentTools);
+  if (register.length === 0 && unregister.length === 0) return;
+  try {
+    await endpointCtx.update({
+      register: register.length > 0 ? { tools: register } : undefined,
+      unregister: unregister.length > 0 ? { tools: unregister } : undefined,
+    });
+    lastMcpToolSnapshot = new Map(currentTools.map((t) => [t.name, t]));
+    console.log(`[desktop] MCP 工具增量同步: +${register.length} -${unregister.length}`);
+  } catch (e: unknown) {
+    console.error("[desktop] MCP 工具增量同步失败:", e instanceof Error ? e.message : e);
+  }
+}
 
 async function initSubsystems(): Promise<void> {
   try {
     await mcpManager.init();
     mcpManager.startWatching();
-    mcpManager.setOnToolsChanged(() => console.log("[desktop] MCP 工具变更，将触发重连"));
+    mcpManager.setOnToolsChanged(() => {
+      console.log("[desktop] MCP 工具变更，增量同步到 Ailo");
+      syncMcpToolsToServer();
+    });
   } catch (e: unknown) {
     console.error("[desktop] MCP 初始化失败:", e instanceof Error ? e.message : e);
   }
@@ -129,7 +166,7 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
     mouse_keyboard: async (args) => mouseKeyboard(args),
     mcp_manage: async (args) => {
       const result = await mcpManager.handle(args);
-      if (result.toolsChanged) console.log("[desktop] MCP 工具列表已变更，将触发重连以更新 Ailo 工具注册");
+      if (result.toolsChanged) syncMcpToolsToServer();
       return result.text;
     },
     send_file: async (args) => {
@@ -245,6 +282,7 @@ async function main(): Promise<void> {
             connectionState.connected = true;
             connectionState.endpointId = cfg.endpointId;
             webchatCtxRef = ctx;
+            lastMcpToolSnapshot = new Map(mcpManager.getAllPrivateTools().map((t) => [t.name, t]));
             serverRef.notifyContextAttached();
             // 启动邮件通道
             const emailCfg = loadEmailConfig(configPath);

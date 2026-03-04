@@ -43,6 +43,7 @@ export type {
   FsProbeMarker,
   FsProbeRequest,
   FsProbeResponse,
+  EndpointUpdateParams,
   EndpointStorage,
   HealthStatus,
   Point2D,

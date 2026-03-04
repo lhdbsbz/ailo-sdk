@@ -99,7 +99,7 @@ export class QQGatewayClient {
 
     ws.on("message", (raw: WebSocket.Data) => {
       try {
-        const payload = JSON.parse(raw.toString()) as QQGatewayPayload;
+        const payload = JSON.parse(raw.toString("utf-8")) as QQGatewayPayload;
         this.handlePayload(payload);
       } catch (err) {
         this.log("error", "failed to parse WS message", { err: String(err) });
@@ -107,7 +107,7 @@ export class QQGatewayClient {
     });
 
     ws.on("close", (code: number, reason: Buffer) => {
-      this.log("warn", `WebSocket closed: ${code} ${reason.toString()}`);
+      this.log("warn", `WebSocket closed: ${code} ${reason.toString("utf-8")}`);
       this.stopHeartbeat();
       if (!this.closed) this.scheduleReconnect();
     });

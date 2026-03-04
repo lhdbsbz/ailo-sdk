@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import { writeFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
+import { tmpdir, platform } from "os";
 
 const MAX_OUTPUT = 50000;
 const DEFAULT_TIMEOUT = 60000;
@@ -39,7 +39,14 @@ function runProcess(cmd: string, args: string[], timeout: number): Promise<{ std
     let stderr = "";
     let killed = false;
 
-    const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], shell: true });
+    const env = {
+      ...process.env,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+      NODE_OPTIONS: process.env.NODE_OPTIONS ?? "",
+    };
+
+    const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], shell: true, env });
 
     proc.stdout?.on("data", (chunk) => {
       stdout += chunk.toString("utf-8");

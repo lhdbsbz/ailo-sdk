@@ -17,6 +17,7 @@ import type {
   SkillMeta,
   HealthStatus,
   EndpointStorage,
+  EndpointUpdateParams,
   FileFetchRequest,
   DirListRequest,
   FilePushRequest,
@@ -41,7 +42,7 @@ function resolveBlueprintPath(blueprint: string): string {
   }
   return path.resolve(blueprint);
 }
-const REQUEST_TIMEOUT_MS = 30_000;
+const HANDSHAKE_TIMEOUT_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -66,7 +67,6 @@ type Frame = {
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 // ─── Callback types ───────────────────────────────────────────────────────────
@@ -146,6 +146,7 @@ export class EndpointClient implements EndpointStorage {
   private evictedHandler: EvictedHandler | null = null;
   private mediaPushHandlers: MediaPushHandler[] = [];
   private fsProbeMarker: FsProbeMarker | null = null;
+  private reconnectWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
   constructor(config: EndpointClientConfig) {
     this.cfg = config;
@@ -165,6 +166,7 @@ export class EndpointClient implements EndpointStorage {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.stopHeartbeat();
     this.rejectAllPending(new Error("client closed"));
+    this.rejectReconnectWaiters(new Error("client closed"));
     this.offlineBuffer.length = 0;
     if (this.ws) { this.ws.close(); this.ws = null; }
     if (this.fsProbeMarker) {
@@ -174,12 +176,21 @@ export class EndpointClient implements EndpointStorage {
   }
 
   /**
-   * Reconnect with optional updated skills and/or connection config.
+   * Reconnect with optional updated skills, tools, blueprints, and/or connection config.
    * - skills: so the server gets the latest enabled skills without restarting.
+   * - tools: update the private tools set for the next connect handshake.
+   * - blueprints: update the blueprint URLs for the next connect handshake.
    * - connectionOverrides: url/apiKey/endpointId — disconnect, wait ~1s, then connect with new config.
    */
-  async reconnect(skills?: SkillMeta[], connectionOverrides?: ConnectionOverrides): Promise<void> {
+  async reconnect(
+    skills?: SkillMeta[],
+    connectionOverrides?: ConnectionOverrides,
+    tools?: ToolCapability[],
+    blueprints?: string[],
+  ): Promise<void> {
     if (skills !== undefined) this.cfg = { ...this.cfg, skills };
+    if (tools !== undefined) this.cfg = { ...this.cfg, tools };
+    if (blueprints !== undefined) this.cfg = { ...this.cfg, blueprints };
     if (connectionOverrides) {
       const { url, apiKey, endpointId } = connectionOverrides;
       if (url !== undefined) this.cfg = { ...this.cfg, url };
@@ -203,6 +214,14 @@ export class EndpointClient implements EndpointStorage {
       await new Promise((r) => setTimeout(r, RECONNECT_COOLDOWN_MS));
     }
     await this.connect();
+  }
+
+  /**
+   * Incrementally update capabilities after connection — register new or unregister existing
+   * tools, blueprints, skills, caps, or instructions without reconnecting.
+   */
+  async update(params: EndpointUpdateParams): Promise<void> {
+    await this.request("endpoint.update", params);
   }
 
   // ─── Callback registration ──────────────────────────────────────────────────
@@ -276,8 +295,14 @@ export class EndpointClient implements EndpointStorage {
     await this.request("world_update", payload as unknown as Record<string, unknown>);
   }
 
-  /** Send a tool_response frame. Call this after receiving and executing a tool_request. */
+  /** Send a tool_response frame. Call this after receiving and executing a tool_request.
+   *  If the connection is down but a reconnect is in progress, waits for reconnection before sending. */
   async toolResponse(payload: ToolResponsePayload): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (!this.intentionalClose) {
+        await this.waitForConnection();
+      }
+    }
     await this.request("tool_response", payload as unknown as Record<string, unknown>);
   }
 
@@ -342,6 +367,7 @@ export class EndpointClient implements EndpointStorage {
           this.attachHandlers(ws);
           this.startHeartbeat();
           this.flushOfflineBuffer();
+          this.resolveReconnectWaiters();
           settle(true);
         } catch (err) {
           ws.close();
@@ -360,10 +386,10 @@ export class EndpointClient implements EndpointStorage {
       const timer = setTimeout(() => {
         ws.off("message", handler);
         reject(new Error("handshake timeout"));
-      }, REQUEST_TIMEOUT_MS);
+      }, HANDSHAKE_TIMEOUT_MS);
 
       const handler = (raw: WebSocket.RawData) => {
-        const frame = JSON.parse(raw.toString()) as Frame;
+        const frame = JSON.parse(raw.toString("utf-8")) as Frame;
         if (frame.type === "res" && frame.id === id) {
           clearTimeout(timer);
           ws.off("message", handler);
@@ -395,14 +421,13 @@ export class EndpointClient implements EndpointStorage {
 
   private attachHandlers(ws: WebSocket): void {
     ws.on("message", (raw: WebSocket.RawData) => {
-      const frame = JSON.parse(raw.toString()) as Frame;
+      const frame = JSON.parse(raw.toString("utf-8")) as Frame;
 
       // res: correlate with pending requests
       if (frame.type === "res" && frame.id) {
         const req = this.pending.get(frame.id);
         if (!req) return;
         this.pending.delete(frame.id);
-        clearTimeout(req.timer);
         frame.ok
           ? req.resolve(frame.payload ?? {})
           : req.reject(new Error(frame.error?.message ?? "request failed"));
@@ -427,11 +452,11 @@ export class EndpointClient implements EndpointStorage {
 
     ws.on("close", (code, reason) => {
       const isEvicted =
-        code === 1001 && reason?.toString().includes("replaced");
+        code === 1001 && reason?.toString("utf-8").includes("replaced");
 
       if (isEvicted) {
-        // Evicted by a newer instance — notify the handler and stop.
         this.intentionalClose = true;
+        this.rejectReconnectWaiters(new Error("evicted"));
         this.evictedHandler?.();
         return;
       }
@@ -460,7 +485,10 @@ export class EndpointClient implements EndpointStorage {
           })
           .catch((err: Error) =>
             this.toolResponse({ id: payload.id, success: false, error: err.message }),
-          );
+          )
+          .catch((sendErr: Error) => {
+            console.error(`[endpoint-client] failed to send tool_response for ${payload.id}: ${sendErr.message}`);
+          });
         break;
       }
       case "intent": {
@@ -529,11 +557,7 @@ export class EndpointClient implements EndpointStorage {
         return;
       }
       const id = `${method}-${++this.reqId}`;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method} timeout (${REQUEST_TIMEOUT_MS}ms)`));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       this.ws.send(JSON.stringify({ type: "req", id, method, params }));
     });
   }
@@ -574,6 +598,24 @@ export class EndpointClient implements EndpointStorage {
     if (this.pongTimer) { clearTimeout(this.pongTimer); this.pongTimer = null; }
   }
 
+  private waitForConnection(): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.intentionalClose) return Promise.reject(new Error("not connected"));
+    return new Promise((resolve, reject) => {
+      this.reconnectWaiters.push({ resolve, reject });
+    });
+  }
+
+  private resolveReconnectWaiters(): void {
+    const waiters = this.reconnectWaiters.splice(0);
+    for (const w of waiters) w.resolve();
+  }
+
+  private rejectReconnectWaiters(err: Error): void {
+    const waiters = this.reconnectWaiters.splice(0);
+    for (const w of waiters) w.reject(err);
+  }
+
   private onDisconnect(): void {
     this.ws = null;
     this.stopHeartbeat();
@@ -583,7 +625,6 @@ export class EndpointClient implements EndpointStorage {
 
   private rejectAllPending(err: Error): void {
     for (const [, req] of this.pending) {
-      clearTimeout(req.timer);
       req.reject(err);
     }
     this.pending.clear();

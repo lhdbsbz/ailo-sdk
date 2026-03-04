@@ -24,6 +24,7 @@ import type {
   AcceptMessage,
   ContentPart,
   EndpointStorage,
+  EndpointUpdateParams,
   HealthStatus,
   ToolHandler,
   ToolCapability,
@@ -45,6 +46,8 @@ export interface EndpointContext {
   resolveToLocal(pathOrUrl: string): Promise<string>;
   /** Send a local file to the server via Blob upload + accept. Returns the FileRef URI. */
   sendFile(localPath: string, opts?: { requiresResponse?: boolean }): Promise<string>;
+  /** Incrementally update capabilities (tools, blueprints, skills, caps) without reconnecting */
+  update(params: EndpointUpdateParams): Promise<void>;
   /** Register a handler for media_push events */
   onMediaPush(handler: (payload: MediaPushPayload) => void | Promise<void>): void;
   client: EndpointClient;
@@ -280,6 +283,7 @@ export function runEndpoint(config: EndpointConfig): void {
         });
         return fileRef;
       },
+      update: (params) => client.update(params),
       onMediaPush(handler) {
         mediaPushHandlers.push(handler);
       },

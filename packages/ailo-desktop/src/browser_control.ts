@@ -699,7 +699,7 @@ export async function browserUse(args: Record<string, unknown>): Promise<string>
 async function actionInstall(): Promise<string> {
   try {
     const { execSync } = await import("child_process");
-    execSync("npx playwright install chromium", { stdio: "pipe", timeout: 120000 });
+    execSync("npx playwright install chromium", { stdio: "pipe", timeout: 120000, encoding: "utf-8" });
     return ok({ message: "Chromium browser installed" });
   } catch (e: any) {
     return fail(`Install failed: ${e.message}`);

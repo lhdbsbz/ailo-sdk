@@ -161,6 +161,26 @@ print(f"  Evaluator      : {'ready' if evaluator else 'NOT READY (no API key)'}"
 print(f"  Listening on   : http://localhost:{PORT}")
 print(f"{'='*60}\n")
 
+def _patch_last_evaluation_payment(actual_payment: float) -> None:
+    """Rewrite the last line of evaluations.jsonl so its ``payment`` field
+    reflects the actual amount received (after the 60 % threshold)."""
+    evals_file = os.path.join(AGENT_DIR, "work", "evaluations.jsonl")
+    if not os.path.isfile(evals_file):
+        return
+    with open(evals_file, encoding="utf-8") as f:
+        lines = f.readlines()
+    if not lines:
+        return
+    try:
+        rec = json.loads(lines[-1])
+        rec["payment"] = actual_payment
+        lines[-1] = json.dumps(rec) + "\n"
+        with open(evals_file, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 
 app = FastAPI(title="ClawWork Sidecar", version="1.0.0")
@@ -331,6 +351,12 @@ def submit_work(req: SubmitRequest):
         task_id=req.task_id,
         evaluation_score=score,
     )
+
+    # Patch the evaluations.jsonl record so "payment" reflects the actual
+    # amount after the 60% threshold (evaluator logs the raw pre-threshold
+    # value which is misleading when score < 0.6).
+    if actual_payment != payment:
+        _patch_last_evaluation_payment(actual_payment)
 
     wall_clock = time.time() - start_time
     tracker.record_task_completion(

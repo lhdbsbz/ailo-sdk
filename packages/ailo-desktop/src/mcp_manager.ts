@@ -7,9 +7,11 @@ import type { ToolCapability } from "@lmcl/ailo-endpoint-sdk";
 type Args = Record<string, unknown>;
 
 interface MCPServerConfig {
-  command: string;
+  transport?: "stdio" | "sse";
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  url?: string;
   enabled?: boolean;
 }
 
@@ -17,14 +19,32 @@ interface MCPConfigFile {
   mcpServers: Record<string, MCPServerConfig>;
 }
 
-interface MCPSession {
+interface PendingRPC {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+}
+
+interface StdioSession {
+  kind: "stdio";
   config: MCPServerConfig;
   proc: ChildProcess;
   tools: ToolCapability[];
   buffer: string;
   nextId: number;
-  pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  pendingRequests: Map<number, PendingRPC>;
 }
+
+interface SSESession {
+  kind: "sse";
+  config: MCPServerConfig;
+  tools: ToolCapability[];
+  nextId: number;
+  pendingRequests: Map<number, PendingRPC>;
+  messageEndpoint: string;
+  abortController: AbortController;
+}
+
+type MCPSession = StdioSession | SSESession;
 
 const CONFIG_DIR = join(homedir(), ".agents");
 const CONFIG_PATH = join(CONFIG_DIR, "mcp_config.json");
@@ -164,14 +184,24 @@ export class LocalMCPManager {
   private async startServer(name: string, config: MCPServerConfig): Promise<void> {
     if (this.sessions.has(name)) await this.stopServer(name);
 
-    const env = { ...process.env, ...(config.env ?? {}) };
-    const proc = spawn(config.command, config.args ?? [], {
+    const transport = config.transport ?? "stdio";
+    if (transport === "sse") {
+      await this.startSSEServer(name, config);
+    } else {
+      await this.startStdioServer(name, config);
+    }
+  }
+
+  private async startStdioServer(name: string, config: MCPServerConfig): Promise<void> {
+    const env = { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", ...(config.env ?? {}) };
+    const proc = spawn(config.command!, config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env,
       shell: true,
     });
 
-    const session: MCPSession = {
+    const session: StdioSession = {
+      kind: "stdio",
       config,
       proc,
       tools: [],
@@ -182,7 +212,7 @@ export class LocalMCPManager {
 
     proc.stdout!.on("data", (chunk: Buffer) => {
       session.buffer += chunk.toString("utf-8");
-      this.processBuffer(session);
+      this.processStdioBuffer(session);
     });
 
     proc.stderr!.on("data", (chunk: Buffer) => {
@@ -199,7 +229,103 @@ export class LocalMCPManager {
     });
 
     this.sessions.set(name, session);
+    await this.initMCPSession(name, session);
+  }
 
+  private async startSSEServer(name: string, config: MCPServerConfig): Promise<void> {
+    const baseUrl = config.url!.replace(/\/+$/, "");
+    const sseUrl = `${baseUrl}/sse`;
+    const abortController = new AbortController();
+
+    const session: SSESession = {
+      kind: "sse",
+      config,
+      tools: [],
+      nextId: 1,
+      pendingRequests: new Map(),
+      messageEndpoint: "",
+      abortController,
+    };
+
+    this.sessions.set(name, session);
+
+    const messageEndpoint = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("SSE connection timeout: no endpoint event received"));
+      }, 15000);
+
+      (async () => {
+        try {
+          const response = await fetch(sseUrl, {
+            signal: abortController.signal,
+            headers: { Accept: "text/event-stream" },
+          });
+          if (!response.ok) throw new Error(`SSE connect failed: HTTP ${response.status}`);
+          if (!response.body) throw new Error("SSE response has no body");
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let sseBuffer = "";
+          let endpointResolved = false;
+
+          const readLoop = async () => {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                if (!abortController.signal.aborted) {
+                  console.log(`[mcp:sse] ${name} SSE stream ended`);
+                  this.sessions.delete(name);
+                  for (const [, pending] of session.pendingRequests) {
+                    pending.reject(new Error(`SSE stream for ${name} ended`));
+                  }
+                }
+                break;
+              }
+              sseBuffer += decoder.decode(value, { stream: true });
+              const lines = sseBuffer.split("\n");
+              sseBuffer = lines.pop() ?? "";
+              let currentEvent = "";
+              let currentData = "";
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  currentEvent = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  currentData = line.slice(5).trim();
+                } else if (line.trim() === "" && currentEvent) {
+                  if (currentEvent === "endpoint" && !endpointResolved) {
+                    endpointResolved = true;
+                    clearTimeout(timeout);
+                    let ep = currentData;
+                    if (ep.startsWith("/")) ep = `${baseUrl}${ep}`;
+                    resolve(ep);
+                  } else if (currentEvent === "message") {
+                    this.handleSSEMessage(session, currentData);
+                  }
+                  currentEvent = "";
+                  currentData = "";
+                }
+              }
+            }
+          };
+          readLoop().catch((err) => {
+            if (!abortController.signal.aborted) {
+              console.error(`[mcp:sse] ${name} read error:`, err.message);
+              this.sessions.delete(name);
+            }
+          });
+        } catch (err: any) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      })();
+    });
+
+    session.messageEndpoint = messageEndpoint;
+    console.log(`[mcp:sse] ${name} connected, message endpoint: ${messageEndpoint}`);
+    await this.initMCPSession(name, session);
+  }
+
+  private async initMCPSession(name: string, session: MCPSession): Promise<void> {
     try {
       await this.rpcRequest(session, "initialize", {
         protocolVersion: "2024-11-05",
@@ -216,7 +342,7 @@ export class LocalMCPManager {
         parameters: t.inputSchema as Record<string, unknown>,
       }));
       session.tools = tools;
-      console.log(`[mcp] ${name} started, discovered ${tools.length} tool(s)`);
+      console.log(`[mcp] ${name} started (${session.kind}), discovered ${tools.length} tool(s)`);
     } catch (e: any) {
       console.error(`[mcp] ${name} init failed:`, e.message);
       await this.stopServer(name);
@@ -228,19 +354,39 @@ export class LocalMCPManager {
     const session = this.sessions.get(name);
     if (!session) return;
     this.sessions.delete(name);
-    try { session.proc.kill("SIGTERM"); } catch {}
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        try { session.proc.kill("SIGKILL"); } catch {}
-        resolve();
-      }, 3000);
-      session.proc.once("exit", () => { clearTimeout(timer); resolve(); });
-    });
+
+    if (session.kind === "stdio") {
+      try { session.proc.kill("SIGTERM"); } catch {}
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          try { session.proc.kill("SIGKILL"); } catch {}
+          resolve();
+        }, 3000);
+        session.proc.once("exit", () => { clearTimeout(timer); resolve(); });
+      });
+    } else {
+      session.abortController.abort();
+      for (const [, pending] of session.pendingRequests) {
+        pending.reject(new Error(`SSE session ${name} stopped`));
+      }
+    }
+  }
+
+  // --- JSON-RPC: unified dispatch ---
+
+  private rpcRequest(session: MCPSession, method: string, params: unknown): Promise<unknown> {
+    if (session.kind === "stdio") return this.stdioRpcRequest(session, method, params);
+    return this.sseRpcRequest(session, method, params);
+  }
+
+  private rpcNotify(session: MCPSession, method: string, params: unknown): void {
+    if (session.kind === "stdio") return this.stdioRpcNotify(session, method, params);
+    this.sseRpcNotify(session, method, params);
   }
 
   // --- JSON-RPC over stdio ---
 
-  private rpcRequest(session: MCPSession, method: string, params: unknown): Promise<unknown> {
+  private stdioRpcRequest(session: StdioSession, method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = session.nextId++;
       session.pendingRequests.set(id, { resolve, reject });
@@ -255,12 +401,12 @@ export class LocalMCPManager {
     });
   }
 
-  private rpcNotify(session: MCPSession, method: string, params: unknown): void {
+  private stdioRpcNotify(session: StdioSession, method: string, params: unknown): void {
     const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
     session.proc.stdin!.write(msg + "\n");
   }
 
-  private processBuffer(session: MCPSession): void {
+  private processStdioBuffer(session: StdioSession): void {
     const lines = session.buffer.split("\n");
     session.buffer = lines.pop() ?? "";
     for (const line of lines) {
@@ -276,6 +422,57 @@ export class LocalMCPManager {
         }
       } catch {}
     }
+  }
+
+  // --- JSON-RPC over SSE ---
+
+  private sseRpcRequest(session: SSESession, method: string, params: unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const id = session.nextId++;
+      session.pendingRequests.set(id, { resolve, reject });
+      const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+      fetch(session.messageEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: msg,
+        signal: session.abortController.signal,
+      }).catch((err) => {
+        if (session.pendingRequests.has(id)) {
+          session.pendingRequests.delete(id);
+          reject(new Error(`SSE POST failed: ${err.message}`));
+        }
+      });
+      setTimeout(() => {
+        if (session.pendingRequests.has(id)) {
+          session.pendingRequests.delete(id);
+          reject(new Error(`RPC timeout for ${method}`));
+        }
+      }, 30000);
+    });
+  }
+
+  private sseRpcNotify(session: SSESession, method: string, params: unknown): void {
+    const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
+    fetch(session.messageEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: msg,
+      signal: session.abortController.signal,
+    }).catch((err) => {
+      console.error(`[mcp:sse] notify POST failed:`, err.message);
+    });
+  }
+
+  private handleSSEMessage(session: SSESession, data: string): void {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.id !== undefined && session.pendingRequests.has(msg.id)) {
+        const pending = session.pendingRequests.get(msg.id)!;
+        session.pendingRequests.delete(msg.id);
+        if (msg.error) pending.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+        else pending.resolve(msg.result);
+      }
+    } catch {}
   }
 
   // --- Tool request execution ---
@@ -295,8 +492,9 @@ export class LocalMCPManager {
     for (const [name, cfg] of this.configs) {
       const session = this.sessions.get(name);
       const status = session ? "运行中" : (cfg.enabled !== false ? "已停止" : "已禁用");
+      const transport = cfg.transport ?? "stdio";
       const toolCount = session?.tools.length ?? 0;
-      lines.push(`- ${name}: ${status} | stdio | ${toolCount} 工具`);
+      lines.push(`- ${name}: ${status} | ${transport} | ${toolCount} 工具`);
       if (session && session.tools.length > 0) {
         for (const t of session.tools) {
           lines.push(`  - ${t.name}: ${t.description ?? ""}`);
@@ -309,7 +507,22 @@ export class LocalMCPManager {
   private async doCreate(args: Args): Promise<{ text: string; toolsChanged: boolean }> {
     const name = args.name as string;
     if (!name) throw new Error("name 必填");
+    const transport = (args.transport as string) ?? "stdio";
+    if (transport === "sse") {
+      const url = args.url as string;
+      if (!url) throw new Error("SSE 模式下 url 必填");
+      const config: MCPServerConfig = {
+        transport: "sse",
+        url,
+        env: args.env as Record<string, string>,
+        enabled: true,
+      };
+      this.configs.set(name, config);
+      await this.saveConfig();
+      return { text: `已创建 MCP 服务 ${name} (SSE)`, toolsChanged: false };
+    }
     const config: MCPServerConfig = {
+      transport: "stdio",
       command: args.command as string ?? "",
       args: args.args as string[],
       env: args.env as Record<string, string>,

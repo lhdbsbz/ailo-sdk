@@ -247,7 +247,7 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
   wss.on("connection", (ws: WebSocket) => {
     ws.on("message", (data: Buffer | ArrayBuffer | Buffer[]) => {
       try {
-        const msg = JSON.parse(Buffer.isBuffer(data) ? data.toString() : String(data));
+        const msg = JSON.parse(Buffer.isBuffer(data) ? data.toString("utf-8") : String(data));
         if (msg.type === "register") handleRegister(msg.participantName, ws);
         else if (msg.type === "chat") handleChatMessage(msg.text, msg.participantName, ws);
       } catch {
@@ -460,7 +460,7 @@ async function runEnvInstall(): Promise<{ installed: string[]; errors: string[] 
   const installed: string[] = [];
   const errors: string[] = [];
   try {
-    execSync("npx playwright install chromium", { stdio: "pipe", timeout: 120000 });
+    execSync("npx playwright install chromium", { stdio: "pipe", timeout: 120000, encoding: "utf-8" });
     installed.push("Playwright Chromium");
   } catch (e: any) {
     errors.push(`Playwright: ${e?.message || "安装失败"}`);
@@ -547,7 +547,17 @@ function getMCPList(mgr: LocalMCPManager) {
   const configs = mgr.getConfigs();
   const servers: any[] = [];
   for (const [name, cfg] of configs) {
-    servers.push({ name, command: (cfg as any).command, args: (cfg as any).args, enabled: (cfg as any).enabled !== false, running: mgr.isRunning(name), tools: mgr.getToolsForServer(name).map((t) => ({ name: t.name, description: t.description })) });
+    const transport = (cfg as any).transport ?? "stdio";
+    servers.push({
+      name,
+      transport,
+      command: (cfg as any).command,
+      args: (cfg as any).args,
+      url: (cfg as any).url,
+      enabled: (cfg as any).enabled !== false,
+      running: mgr.isRunning(name),
+      tools: mgr.getToolsForServer(name).map((t) => ({ name: t.name, description: t.description })),
+    });
   }
   return { servers };
 }
@@ -891,12 +901,27 @@ code{font-size:14px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.25)
 <div class="modal-overlay" id="mcpCreateModal">
   <div class="modal" style="max-width:520px">
     <h3>新增 MCP 服务</h3>
-    <p style="font-size:14px;color:#9ca3af;margin-bottom:14px">名称、命令与参数（第一项为可执行命令，其余为参数，每行一项）、环境变量可选</p>
+    <p style="font-size:14px;color:#9ca3af;margin-bottom:14px">选择传输类型：stdio（本地命令）或 SSE（远程服务器 URL）</p>
     <div class="form-group"><label>名称</label><input id="mcpName" placeholder="filesystem"></div>
     <div class="form-group">
-      <label>命令与参数（数组）</label>
-      <div id="mcpCommandArgsList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
-      <button type="button" class="btn btn-sm" style="background:#374151;color:#e0e0e0" onclick="addMCPArgvRow()">+ 添加一项</button>
+      <label>传输类型</label>
+      <select id="mcpTransport" onchange="onMCPTransportChange()">
+        <option value="stdio">stdio（本地命令）</option>
+        <option value="sse">SSE（远程服务器）</option>
+      </select>
+    </div>
+    <div id="mcpStdioFields">
+      <div class="form-group">
+        <label>命令与参数（数组）</label>
+        <div id="mcpCommandArgsList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
+        <button type="button" class="btn btn-sm" style="background:#374151;color:#e0e0e0" onclick="addMCPArgvRow()">+ 添加一项</button>
+      </div>
+    </div>
+    <div id="mcpSSEFields" style="display:none">
+      <div class="form-group">
+        <label>服务器 URL</label>
+        <input id="mcpSSEUrl" placeholder="http://localhost:3001">
+      </div>
     </div>
     <div class="form-group">
       <label>环境变量</label>
@@ -964,11 +989,19 @@ function showToolsSubTab(sub){
 }
 function showInstallModal(){document.getElementById('installModal').style.display='flex';}
 function showCreateModal(){document.getElementById('createModal').style.display='flex';}
+function onMCPTransportChange(){
+  const transport=document.getElementById('mcpTransport').value;
+  document.getElementById('mcpStdioFields').style.display=transport==='stdio'?'block':'none';
+  document.getElementById('mcpSSEFields').style.display=transport==='sse'?'block':'none';
+}
 function showMCPCreateModal(){
   const list=document.getElementById('mcpCommandArgsList');
   const envList=document.getElementById('mcpEnvList');
   list.innerHTML='';
   envList.innerHTML='';
+  document.getElementById('mcpTransport').value='stdio';
+  onMCPTransportChange();
+  document.getElementById('mcpSSEUrl').value='';
   addMCPArgvRow('npx');
   addMCPArgvRow('-y');
   addMCPArgvRow('@modelcontextprotocol/server-filesystem');
@@ -1061,9 +1094,11 @@ async function loadAll(){
 async function loadMCP(){
   try{const d=await fetch(API+'/api/mcp').then(r=>r.json());const el=document.getElementById('mcpList');
   if(!d.servers||!d.servers.length){el.innerHTML='<p style="color:#9ca3af;font-size:14px">暂无 MCP 服务，点击「新增」添加</p>';return;}
-  let h='<table><thead><tr><th>名称</th><th>命令</th><th>状态</th><th>工具</th><th>操作</th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>名称</th><th>传输</th><th>连接</th><th>状态</th><th>工具</th><th>操作</th></tr></thead><tbody>';
   for(const s of d.servers){
-    h+='<tr><td>'+s.name+'</td><td><code>'+(s.command||'')+' '+(s.args||[]).join(' ')+'</code></td><td>'+(s.running?'<span class="badge on">运行中</span>':'<span class="badge off">停止</span>')+'</td><td>'+(s.tools?.length||0)+'</td><td>';
+    const transport=s.transport||'stdio';
+    const connInfo=transport==='sse'?'<code>'+(s.url||'')+'</code>':'<code>'+(s.command||'')+' '+(s.args||[]).join(' ')+'</code>';
+    h+='<tr><td>'+s.name+'</td><td><span class="badge '+(transport==='sse'?'custom':'builtin')+'">'+transport+'</span></td><td>'+connInfo+'</td><td>'+(s.running?'<span class="badge on">运行中</span>':'<span class="badge off">停止</span>')+'</td><td>'+(s.tools?.length||0)+'</td><td>';
     if(s.running)h+='<button class="btn btn-sm" style="background:#374151;color:#e0e0e0" onclick="mcpStop(\\''+s.name+'\\')">停止</button> ';
     else h+='<button class="btn btn-success btn-sm" onclick="mcpStart(\\''+s.name+'\\')">启动</button> ';
     h+='<button class="btn btn-danger btn-sm" onclick="mcpDelete(\\''+s.name+'\\')">删除</button></td></tr>';
@@ -1072,16 +1107,26 @@ async function loadMCP(){
 }
 async function doCreateMCP(){
   const name=document.getElementById('mcpName').value.trim();
-  const argvItems=Array.from(document.querySelectorAll('.mcp-argv-item')).map(el=>el.value.trim()).filter(Boolean);
-  const command=argvItems[0]||'';
-  const args=argvItems.slice(1);
+  const transport=document.getElementById('mcpTransport').value;
   const env={};
   document.querySelectorAll('.mcp-env-row').forEach(row=>{
     const k=(row.querySelector('.mcp-env-key').value||'').trim();
     if(k) env[k]=(row.querySelector('.mcp-env-val').value||'').trim();
   });
-  if(!name||!command){alert('请填写名称和命令（命令与参数至少填第一项）');return;}
-  try{const r=await fetch(API+'/api/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create',name,command,args,env})}).then(r=>r.json());
+  if(!name){alert('请填写名称');return;}
+  let payload;
+  if(transport==='sse'){
+    const url=document.getElementById('mcpSSEUrl').value.trim();
+    if(!url){alert('请填写服务器 URL');return;}
+    payload={action:'create',name,transport:'sse',url,env};
+  }else{
+    const argvItems=Array.from(document.querySelectorAll('.mcp-argv-item')).map(el=>el.value.trim()).filter(Boolean);
+    const command=argvItems[0]||'';
+    const args=argvItems.slice(1);
+    if(!command){alert('请填写命令（命令与参数至少填第一项）');return;}
+    payload={action:'create',name,transport:'stdio',command,args,env};
+  }
+  try{const r=await fetch(API+'/api/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
   if(r.text){hideModal('mcpCreateModal');document.getElementById('mcpName').value='';loadMCP();alert(r.text);}
   else alert(r.error||'添加失败');}catch(e){alert('请求失败');}
 }
