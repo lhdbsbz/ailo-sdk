@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from "child_process";
+import { spawnSync } from "child_process";
 import * as os from "os";
 import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
 import { takeScreenshot } from "./screenshot.js";
@@ -11,19 +11,29 @@ function fail(error: string): ContentPart[] {
   return [{ type: "text", text: JSON.stringify({ ok: false, error }, null, 2) }];
 }
 
+function runPowerShell(script: string): string {
+  const r = spawnSync("powershell", ["-Command", script], { encoding: "utf-8", timeout: 10000 });
+  return (r.stdout ?? "").trim();
+}
+
+function runShell(cmd: string): string {
+  const r = spawnSync("/bin/sh", ["-c", cmd], { encoding: "utf-8", timeout: 10000 });
+  return (r.stdout ?? "").trim();
+}
+
 function getScreenSize(): { width: number; height: number } {
   const platform = os.platform();
   if (platform === "win32") {
     const ps = `Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; Write-Output "$($s.Width)x$($s.Height)"`;
-    const out = execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" }).trim();
+    const out = runPowerShell(ps);
     const [w, h] = out.split("x").map(Number);
     return { width: w, height: h };
   } else if (platform === "darwin") {
-    const out = execSync("system_profiler SPDisplaysDataType | grep Resolution", { encoding: "utf-8" }).trim();
+    const out = runShell("system_profiler SPDisplaysDataType | grep Resolution");
     const m = out.match(/(\d+)\s*x\s*(\d+)/);
     if (m) return { width: Number(m[1]), height: Number(m[2]) };
   } else {
-    const out = execSync("xdpyinfo | grep dimensions", { encoding: "utf-8" }).trim();
+    const out = runShell("xdpyinfo | grep dimensions");
     const m = out.match(/(\d+)x(\d+)/);
     if (m) return { width: Number(m[1]), height: Number(m[2]) };
   }
@@ -52,7 +62,7 @@ function mouseMove(x: number, y: number): void {
   const platform = os.platform();
   if (platform === "win32") {
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x},${y})`;
-    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["m:" + x + "," + y]);
   } else {
@@ -70,13 +80,13 @@ function mouseClick(x: number, y: number, button: string = "left"): void {
       "Add-Type -AssemblyName System.Windows.Forms",
       `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x},${y})`,
       '$sig = @"',
-      "[DllImport(\"user32.dll\")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);",
+      '[DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);',
       '"@',
       "$m = Add-Type -MemberDefinition $sig -Name WinMouse -Namespace Win32 -PassThru",
       `$m::mouse_event(${downFlag},0,0,0,0)`,
       `$m::mouse_event(${upFlag},0,0,0,0)`,
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     const clickCmd = button === "right" ? "rc" : "c";
     spawnSync("cliclick", [clickCmd + ":" + x + "," + y]);
@@ -94,14 +104,14 @@ function mouseDoubleClick(x: number, y: number): void {
       "Add-Type -AssemblyName System.Windows.Forms",
       `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x},${y})`,
       '$sig = @"',
-      "[DllImport(\"user32.dll\")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);",
+      '[DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);',
       '"@',
       "$m = Add-Type -MemberDefinition $sig -Name WinMouse2 -Namespace Win32 -PassThru",
       "$m::mouse_event(0x0002,0,0,0,0); $m::mouse_event(0x0004,0,0,0,0)",
       "Start-Sleep -Milliseconds 50",
       "$m::mouse_event(0x0002,0,0,0,0); $m::mouse_event(0x0004,0,0,0,0)",
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["dc:" + x + "," + y]);
   } else {
@@ -117,7 +127,7 @@ function mouseDrag(sx: number, sy: number, ex: number, ey: number): void {
       "Add-Type -AssemblyName System.Windows.Forms",
       `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${sx},${sy})`,
       '$sig = @"',
-      "[DllImport(\"user32.dll\")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);",
+      '[DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);',
       '"@',
       "$m = Add-Type -MemberDefinition $sig -Name WinMouse3 -Namespace Win32 -PassThru",
       "$m::mouse_event(0x0002,0,0,0,0)",
@@ -126,7 +136,7 @@ function mouseDrag(sx: number, sy: number, ex: number, ey: number): void {
       "Start-Sleep -Milliseconds 50",
       "$m::mouse_event(0x0004,0,0,0,0)",
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["dd:" + sx + "," + sy, "dm:" + ex + "," + ey, "du:" + ex + "," + ey]);
   } else {
@@ -139,7 +149,7 @@ function keyboardType(text: string): void {
   if (platform === "win32") {
     const escaped = text.replace(/'/g, "''");
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`;
-    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     spawnSync("cliclick", ["t:" + text]);
   } else {
@@ -168,7 +178,7 @@ function keyboardHotkey(keys: string): void {
       sendKeysStr += map[lower] ?? k;
     }
     const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${sendKeysStr}')`;
-    execSync(`powershell -Command "${ps}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     const macKeys = keyNames.map(k => {
       const map: Record<string, string> = { ctrl: "cmd", control: "cmd", alt: "alt", shift: "shift", meta: "cmd", cmd: "cmd" };
@@ -186,12 +196,12 @@ function mouseScroll(direction: string, amount: number): void {
     const delta = direction === "up" ? (amount * 120) : -(amount * 120);
     const ps = [
       '$sig = @"',
-      "[DllImport(\"user32.dll\")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);",
+      '[DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);',
       '"@',
       "$m = Add-Type -MemberDefinition $sig -Name WinMouse4 -Namespace Win32 -PassThru",
       `$m::mouse_event(0x0800,0,0,${delta},0)`,
     ].join("; ");
-    execSync(`powershell -Command "${ps.replace(/"/g, '\\"')}"`, { encoding: "utf-8" });
+    runPowerShell(ps);
   } else if (platform === "darwin") {
     const scrollAmount = direction === "up" ? amount : -amount;
     spawnSync("cliclick", ["w:" + scrollAmount]);
