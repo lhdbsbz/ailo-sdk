@@ -10,6 +10,8 @@ export type MediaData = {
   url?: string;
   mime?: string;
   name?: string;
+  /** Original path on the source endpoint before blob upload. Set by autoUploadMedia. */
+  sourcePath?: string;
 };
 
 export type ContentPart = {
@@ -133,15 +135,6 @@ export type StreamPayload = {
   action: "start" | "chunk" | "end";
   text?: string;           // present when action="chunk"
   correlationId?: string;  // links to the accept/world_update that triggered the stream
-};
-
-/** Received via media_push event — server pushes a file to an endpoint */
-export type MediaPushPayload = {
-  file_ref: string;         // ailo://blob/... URI
-  url: string;              // HTTP download URL
-  mime: string;
-  name?: string;
-  message?: string;
 };
 
 /** Received via file_fetch request — server asks endpoint to upload a local file */

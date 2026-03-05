@@ -179,7 +179,7 @@ export function startConfigServer(deps: ConfigServerDeps): ConfigServerRef {
     }
     bindClient(routeName, ws);
     const tags: ContextTag[] = [
-      { kind: "channel", value: "网页聊天", groupWith: true },
+      { kind: "channel", value: "web", groupWith: true },
       { kind: "conv_type", value: "私聊", groupWith: false },
       { kind: "chat_id", value: routeName, groupWith: true, passToTool: true },
       { kind: "participant", value: routeName, groupWith: false },
@@ -368,7 +368,7 @@ function checkPython(): EnvRuntimeItem {
       return {
         id: "python",
         name: "Python",
-        description: "代码执行、文档编辑 / 演示文稿 / 电子表格等 Skills",
+        description: "代码执行、电子表格等 Skills",
         ok: true,
         detail: version,
         canAutoInstall: false,
@@ -398,7 +398,7 @@ function checkPython(): EnvRuntimeItem {
   return {
     id: "python",
     name: "Python",
-    description: "代码执行、文档编辑 / 演示文稿 / 电子表格等 Skills",
+    description: "代码执行、电子表格等 Skills",
     ok: false,
     hint,
     canAutoInstall: false,
@@ -434,61 +434,12 @@ async function checkPlaywright(): Promise<EnvRuntimeItem> {
   };
 }
 
-/** 检测 LibreOffice（document-editing / presentation 转 PDF、PPT 预览等可选依赖） */
-function checkLibreOffice(): EnvRuntimeItem {
-  const commands = ["soffice", "libreoffice"];
-  for (const cmd of commands) {
-    const r = spawnSync(cmd, ["--version"], { encoding: "utf-8", timeout: 5000 });
-    if (r.status === 0 && (r.stdout || r.stderr || "").trim()) {
-      const out = (r.stdout || r.stderr || "").trim();
-      return {
-        id: "libreoffice",
-        name: "LibreOffice",
-        description: "Word/PPT 转 PDF、演示文稿预览等（document-editing / presentation）",
-        ok: true,
-        detail: out.split(/\n/)[0]?.trim() || "已安装",
-        canAutoInstall: false,
-      };
-    }
-  }
-  const platform = process.platform;
-  let hint: string;
-  if (platform === "win32") {
-    hint =
-      "LibreOffice 用于 Word/PPT 转 PDF、演示文稿预览等（document-editing、presentation Skills）。\n\n" +
-      "1. 打开官网下载页：https://www.libreoffice.org/download\n" +
-      "2. 选择 Windows 版本，下载安装包并运行安装程序\n" +
-      "3. 安装完成后，确保「LibreOffice」或 soffice 已加入系统 PATH（通常自动配置）\n" +
-      "4. 在终端执行 soffice --version 验证";
-  } else if (platform === "darwin") {
-    hint =
-      "LibreOffice 用于 Word/PPT 转 PDF、演示文稿预览等（document-editing、presentation Skills）。\n\n" +
-      "1. 执行：brew install --cask libreoffice\n" +
-      "2. 安装完成后在终端执行 libreoffice --version 或 soffice --version 验证";
-  } else {
-    hint =
-      "LibreOffice 用于 Word/PPT 转 PDF、演示文稿预览等（document-editing、presentation Skills）。\n\n" +
-      "1. Debian/Ubuntu：sudo apt install libreoffice\n" +
-      "2. Fedora/RHEL：sudo dnf install libreoffice\n" +
-      "3. 安装后在终端执行 soffice --version 或 libreoffice --version 验证";
-  }
-  return {
-    id: "libreoffice",
-    name: "LibreOffice",
-    description: "Word/PPT 转 PDF、演示文稿预览等（document-editing / presentation）",
-    ok: false,
-    hint,
-    canAutoInstall: false,
-  };
-}
-
 async function getEnvCheck(): Promise<EnvCheckResult> {
   const playwright = await checkPlaywright();
   const runtimes: EnvRuntimeItem[] = [
     checkNode(),
     checkPython(),
     playwright,
-    checkLibreOffice(),
   ];
   return { runtimes };
 }

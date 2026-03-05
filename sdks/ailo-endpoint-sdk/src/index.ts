@@ -1,6 +1,6 @@
 export { EndpointClient, RECONNECT_COOLDOWN_MS } from "./endpoint-client.js";
 export type { EndpointClientConfig, ConnectionOverrides } from "./endpoint-client.js";
-export type { ToolRequestHandler, IntentHandler, WorldEnrichmentHandler, StreamHandler, SignalHandler, EvictedHandler, MediaPushHandler } from "./endpoint-client.js";
+export type { ToolRequestHandler, IntentHandler, WorldEnrichmentHandler, StreamHandler, SignalHandler, EvictedHandler } from "./endpoint-client.js";
 
 export { runEndpoint } from "./bootstrap.js";
 export type { EndpointConfig, EndpointContext, EndpointHandler } from "./bootstrap.js";
@@ -32,7 +32,6 @@ export type {
   IntentPayload,
   ToolRequestPayload,
   StreamPayload,
-  MediaPushPayload,
   FileFetchRequest,
   FileFetchResponse,
   DirListRequest,

@@ -29,7 +29,6 @@ import type {
   ToolHandler,
   ToolCapability,
   SkillMeta,
-  MediaPushPayload,
 } from "./types.js";
 
 export interface EndpointContext {
@@ -48,8 +47,6 @@ export interface EndpointContext {
   sendFile(localPath: string, opts?: { requiresResponse?: boolean }): Promise<string>;
   /** Incrementally update capabilities (tools, blueprints, skills, caps) without reconnecting */
   update(params: EndpointUpdateParams): Promise<void>;
-  /** Register a handler for media_push events */
-  onMediaPush(handler: (payload: MediaPushPayload) => void | Promise<void>): void;
   client: EndpointClient;
 }
 
@@ -67,8 +64,8 @@ export interface EndpointConfig {
   tools?: ToolCapability[];
   /** Map of tool name → handler function for automatic tool_request dispatch */
   toolHandlers?: Record<string, ToolHandler>;
-  /** When tool name not in toolHandlers, try this (e.g. for MCP serverName:toolName). Return null to throw unknown tool. */
-  onUnknownTool?: (name: string, args: Record<string, unknown>) => Promise<unknown> | null;
+  /** Fallback for tool names not in toolHandlers (e.g. MCP serverName:toolName). Throw or return undefined to reject as unknown. */
+  onUnknownTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   /** Blueprint IDs to activate for this endpoint session */
   blueprints?: string[];
   /** Override WebSocket URL (default: AILO_WS_URL env var) */
@@ -146,16 +143,6 @@ export function runEndpoint(config: EndpointConfig): void {
   (async () => {
     const ailoHttpBase = deriveHttpBase(ailoWsUrl);
     const blobUrlPrefix = `${ailoHttpBase}/api/blob/`;
-    const mediaPushHandlers: Array<(payload: MediaPushPayload) => void | Promise<void>> = [];
-
-    client.onMediaPush((payload) => {
-      for (const h of mediaPushHandlers) {
-        Promise.resolve(h(payload)).catch((err) => {
-          console.error(`${tag} media_push handler error:`, err);
-        });
-      }
-    });
-
     // ── blob helpers ──
 
     async function uploadBlob(localPath: string): Promise<string> {
@@ -214,6 +201,7 @@ export function runEndpoint(config: EndpointConfig): void {
             fileRef,
             mime: part.media.mime || inferMime(absPath),
             name: part.media.name || path.basename(absPath),
+            sourcePath: absPath,
           },
         };
       }
@@ -250,17 +238,14 @@ export function runEndpoint(config: EndpointConfig): void {
       const onUnknown = config.onUnknownTool;
       client.onToolRequest(async (req) => {
         await resolveFileArgsInPlace(req.args);
-        let fn = handlers[req.name];
-        if (!fn) {
-          if (onUnknown) {
-            const fallback = await onUnknown(req.name, req.args);
-            if (fallback !== null) return fallback;
-          }
-          throw new Error(`unknown tool: ${req.name}`);
+        const fn = handlers[req.name];
+        if (fn) {
+          const result = await fn(req.args);
+          if (isContentParts(result)) await autoUploadMedia(result);
+          return result;
         }
-        const result = await fn(req.args);
-        if (isContentParts(result)) await autoUploadMedia(result);
-        return result;
+        if (onUnknown) return onUnknown(req.name, req.args);
+        throw new Error(`unknown tool: ${req.name}`);
       });
     }
 
@@ -293,9 +278,6 @@ export function runEndpoint(config: EndpointConfig): void {
         return fileRef;
       },
       update: (params) => client.update(params),
-      onMediaPush(handler) {
-        mediaPushHandlers.push(handler);
-      },
       client,
     };
 

@@ -30,19 +30,8 @@ export async function execTool(ctx: EndpointContext, args: Record<string, unknow
 
   const proc = spawn(shell, shellArgs, { stdio: ["pipe", "pipe", "pipe"], cwd, env });
 
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    timeoutHandle = null;
-    try { proc.kill("SIGTERM"); } catch {}
-    setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 2000);
-    ctx.sendSignal("tool_result", {
-      content: `[exec 超时] \`${command}\`\n超过 ${timeoutMs / 1000}s 未完成，已终止`,
-    });
-  }, timeoutMs);
-
   const output: string[] = [];
   let sent = false;
-  proc.stdout?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
-  proc.stderr?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
 
   const sendResult = (content: string) => {
     if (sent) return;
@@ -50,6 +39,16 @@ export async function execTool(ctx: EndpointContext, args: Record<string, unknow
     if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
     ctx.sendSignal("tool_result", { content });
   };
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    timeoutHandle = null;
+    try { proc.kill("SIGTERM"); } catch {}
+    setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 2000);
+    sendResult(`[exec 超时] \`${command}\`\n超过 ${timeoutMs / 1000}s 未完成，已终止`);
+  }, timeoutMs);
+
+  proc.stdout?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
+  proc.stderr?.on("data", (d: Buffer) => output.push(d.toString("utf-8")));
 
   proc.on("close", (code) => {
     const text = output.join("").trim();

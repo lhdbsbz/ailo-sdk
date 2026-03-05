@@ -4,19 +4,20 @@ version: 1.2.0
 description: 桌面 Agent，提供截图、浏览器自动化、文件系统、命令执行、代码执行、定时任务和本地 MCP 管理能力
 tools:
   - name: screenshot
-    description: 截取当前桌面屏幕，返回图片供视觉分析。macOS 支持 capture_window 选择窗口截图
+    description: 在端点上截取桌面屏幕，返回图片供视觉分析。返回文案会注明当前是第几块/共几块屏，多显示器时可用 screen（0-based）指定截取某块。不传 screen 则截取全部。macOS 支持 capture_window 选择窗口截图
     timeout: 15
     parameters:
       type: object
       properties:
         capture_window: { type: boolean, description: "true 时选择窗口截图（仅 macOS）" }
+        screen: { type: integer, description: "多显示器时指定截取哪块屏，0-based（0=第一块、1=第二块…）。不传则截取全部显示器合成的画面" }
 
   - name: get_current_time
-    description: 获取当前本地时间、星期和时区
+    description: 在端点上获取当前本地时间、星期和时区
     timeout: 5
 
   - name: read_file
-    description: 按行范围读取本地文件内容（带行号）。大文件（>2MB）自动截断，可配合 offset/limit 分页
+    description: 在端点上按行范围读取文件内容（带行号）。大文件（>2MB）自动截断，可配合 offset/limit 分页
     timeout: 30
     parameters:
       type: object
@@ -27,7 +28,7 @@ tools:
       required: [path]
 
   - name: write_file
-    description: 创建或覆写本地文件，自动创建父目录
+    description: 在端点上创建或覆写文件，自动创建父目录
     timeout: 30
     parameters:
       type: object
@@ -37,7 +38,7 @@ tools:
       required: [path, content]
 
   - name: edit_file
-    description: 在本地文件中精确替换字符串
+    description: 在端点上对文件进行精确字符串替换
     timeout: 30
     parameters:
       type: object
@@ -49,7 +50,7 @@ tools:
       required: [path, old_string, new_string]
 
   - name: append_file
-    description: 向本地文件追加内容，文件不存在则创建
+    description: 在端点上向文件追加内容，文件不存在则创建
     timeout: 30
     parameters:
       type: object
@@ -59,7 +60,7 @@ tools:
       required: [path, content]
 
   - name: list_directory
-    description: 列出本地目录内容
+    description: 在端点上列出目录内容
     timeout: 15
     parameters:
       type: object
@@ -68,7 +69,7 @@ tools:
       required: [path]
 
   - name: find_files
-    description: 按文件名模式搜索本地文件
+    description: 在端点上按文件名模式搜索文件
     timeout: 30
     parameters:
       type: object
@@ -79,7 +80,7 @@ tools:
       required: [pattern]
 
   - name: search_content
-    description: 在本地文件中搜索内容（支持正则）
+    description: 在端点上搜索文件内容（支持正则）
     timeout: 60
     parameters:
       type: object
@@ -92,7 +93,7 @@ tools:
       required: [query]
 
   - name: delete_file
-    description: 删除本地文件或目录
+    description: 在端点上删除文件或目录
     timeout: 15
     parameters:
       type: object
@@ -102,7 +103,7 @@ tools:
       required: [path]
 
   - name: move_file
-    description: 移动或重命名本地文件
+    description: 在端点上移动或重命名文件
     timeout: 15
     parameters:
       type: object
@@ -112,7 +113,7 @@ tools:
       required: [source, destination]
 
   - name: copy_file
-    description: 复制本地文件或目录
+    description: 在端点上复制文件或目录
     timeout: 15
     parameters:
       type: object
@@ -122,7 +123,7 @@ tools:
       required: [source, destination]
 
   - name: execute_code
-    description: 在本地执行 Python 或 JavaScript 代码。立即启动，完成后结果自动推送回来，无需等待或轮询。支持 cwd 指定工作目录，超时（默认 120s）会自动终止
+    description: 在端点上执行 Python 或 JavaScript 代码。立即启动，完成后结果自动推送回来，无需等待或轮询。支持 cwd 指定工作目录，超时（默认 120s）会自动终止
     timeout: 5
     parameters:
       type: object
@@ -134,7 +135,7 @@ tools:
       required: [language, code]
 
   - name: exec
-    description: 在本地机器执行 shell 命令。立即启动，完成后结果自动推送回来，无需等待或轮询。超时（默认 120s）会自动终止
+    description: 在端点上执行 shell 命令。立即启动，完成后结果自动推送回来，无需等待或轮询。超时（默认 120s）会自动终止
     timeout: 5
     parameters:
       type: object
@@ -145,7 +146,7 @@ tools:
       required: [command]
 
   - name: mcp_manage
-    description: 管理本地 MCP 服务（list/create/delete/start/stop）。start 后自动向 Ailo 注册新工具
+    description: 在端点上管理 MCP 服务（list/create/delete/start/stop）。start 后新工具自动注册可用
     timeout: 300
     parameters:
       type: object
@@ -160,7 +161,7 @@ tools:
       required: [action]
 
   - name: browser_use
-    description: 控制浏览器进行网页浏览、交互和信息提取。流程：start → open(url) → snapshot 获取 refs → click/type 等。支持多标签页
+    description: 在端点上控制浏览器进行网页浏览、交互和信息提取。流程：start → open(url) → snapshot 获取 refs → click/type 等。支持多标签页
     timeout: 120
     parameters:
       type: object
@@ -203,7 +204,7 @@ tools:
       required: [action]
 
   - name: mouse_keyboard
-    description: 控制鼠标和键盘进行桌面 GUI 操作。支持像素坐标(x/y)和归一化坐标(norm_x/norm_y, 0-1000)。操作后可自动截图验证
+    description: 在端点上控制鼠标和键盘进行桌面 GUI 操作。通常先 screenshot 获取界面，分析目标位置后传入坐标。支持像素坐标(x/y)和归一化坐标(norm_x/norm_y, 0-1000)。screenshot_after=true 可操作后自动截图验证
     timeout: 10
     parameters:
       type: object
@@ -211,7 +212,7 @@ tools:
         action:
           type: string
           enum: [click, double_click, right_click, move, drag, type, hotkey, scroll, get_screen_size]
-          description: "操作类型"
+          description: "动作：click/双击/右键/移动/拖拽/输入/快捷键/滚动，或 get_screen_size 获取屏幕尺寸（用于 norm 坐标换算）"
         x: { type: number, description: "X 像素坐标" }
         y: { type: number, description: "Y 像素坐标" }
         norm_x: { type: number, description: "归一化 X 坐标 (0-1000)" }
@@ -240,20 +241,20 @@ tools:
 ## 工具说明
 
 ### screenshot
-截取当前桌面屏幕。截图通过 tool_response.content 以 image ContentPart 返回。
+截取桌面屏幕。返回文案会注明「第 X 块/共 Y 块屏」，多显示器时可根据提示用 `screen=0`、`screen=1` 等分别截取。不传 `screen` 则截取全部。截图通过 tool_response.content 以 image ContentPart 返回。
 macOS 支持 `capture_window=true` 选择窗口截图。
 
 ### get_current_time
 返回本地时间、星期和时区，如 `2026-03-01 17:30:45 Saturday (UTC+0800)`。
 
 ### execute_code
-在本地执行 Python 或 JavaScript 代码。调用后立即返回确认，代码在后台运行，完成后结果（stdout、stderr、退出码）自动推送回来。用于数据计算、脚本自动化等。
+在端点上执行 Python 或 JavaScript 代码。调用后立即返回确认，代码在后台运行，完成后结果（stdout、stderr、退出码）自动推送回来。用于数据计算、脚本自动化等。
 
 ### append_file
 向文件末尾追加内容。文件不存在时自动创建（含父目录）。
 
 ### exec
-在本地执行 shell 命令。调用后立即返回确认，命令在后台运行，完成后结果自动推送回来。无需轮询或手动查看状态。
+在端点上执行 shell 命令。调用后立即返回确认，命令在后台运行，完成后结果自动推送回来。无需轮询或手动查看状态。
 
 ### mcp_manage
 管理本地 MCP 服务。执行 `start` 后，端点会自动重连 Ailo 并注册新发现的工具。

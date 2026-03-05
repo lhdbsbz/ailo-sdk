@@ -68,10 +68,6 @@ export async function executeCode(ctx: EndpointContext, args: Record<string, unk
   }, timeoutMs);
 
   proc.on("close", (exitCode) => {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-      timeoutHandle = null;
-    }
     const text = output.join("").trim();
     const truncated = text.length > MAX_OUTPUT
       ? text.slice(0, MAX_OUTPUT / 2) + "\n...[截断]...\n" + text.slice(-MAX_OUTPUT / 2)

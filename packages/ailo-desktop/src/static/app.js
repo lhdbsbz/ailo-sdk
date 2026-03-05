@@ -467,7 +467,7 @@ async function saveQQConfig() {
 }
 
 /* ─── Env Check ────────────────────────────────────────────────── */
-const ENV_ICONS = { node:'⬡', python:'🐍', playwright:'🎭', libreoffice:'📄' };
+const ENV_ICONS = { node:'⬡', python:'🐍', playwright:'🎭' };
 
 async function loadEnvCheck() {
   const el = document.getElementById('envCheckList');

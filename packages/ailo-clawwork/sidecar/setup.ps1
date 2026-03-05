@@ -68,33 +68,7 @@ $metaPrompts = Join-Path $CLAWWORK "eval/meta_prompts"
 $metaCount = (Get-ChildItem -Path $metaPrompts -Filter "*.json" -ErrorAction SilentlyContinue | Measure-Object).Count
 Write-Host "[OK] Found $metaCount evaluation meta-prompts" -ForegroundColor Green
 
-# ── 4. LibreOffice (PPTX/DOCX evaluation needs it) ──
-$loPath = "C:\Program Files\LibreOffice\program"
-$loInstalled = Test-Path "$loPath\soffice.exe"
-if ($loInstalled) {
-    Write-Host "[OK] LibreOffice already installed at: $loPath" -ForegroundColor Green
-} else {
-    Write-Host "[..] Installing LibreOffice via winget..." -ForegroundColor Yellow
-    $ErrorActionPreference = "Continue"
-    winget install TheDocumentFoundation.LibreOffice --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
-    $ErrorActionPreference = "Stop"
-    $loInstalled = Test-Path "$loPath\soffice.exe"
-    if ($loInstalled) {
-        Write-Host "[OK] LibreOffice installed" -ForegroundColor Green
-    } else {
-        Write-Host "[WARN] LibreOffice not found after install. Please install manually: https://www.libreoffice.org/download" -ForegroundColor Yellow
-    }
-}
-if ($loInstalled) {
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($userPath -notlike "*$loPath*") {
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$loPath", "User")
-        $env:Path = "$env:Path;$loPath"
-        Write-Host "     Added LibreOffice to PATH" -ForegroundColor Green
-    }
-}
-
-# ── 5. Poppler (PDF to image conversion) ──
+# ── 4. Poppler (PDF to image conversion) ──
 $popplerBin = Get-ChildItem -Path "C:\tools\poppler" -Recurse -Filter "pdftoppm.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($popplerBin) {
     Write-Host "[OK] Poppler already installed at: $($popplerBin.DirectoryName)" -ForegroundColor Green
@@ -124,7 +98,7 @@ if ($popplerBin) {
     }
 }
 
-# ── 6. Python venv ──
+# ── 5. Python venv ──
 $VENV = Join-Path $SIDECAR_DIR ".venv"
 if (Test-Path (Join-Path $VENV "Scripts/python.exe")) {
     Write-Host "[OK] Python venv already exists" -ForegroundColor Green
@@ -134,7 +108,7 @@ if (Test-Path (Join-Path $VENV "Scripts/python.exe")) {
     Write-Host "[OK] Venv created at: $VENV" -ForegroundColor Green
 }
 
-# ── 5. Install dependencies ──
+# ── 6. Install dependencies ──
 Write-Host "[..] Installing Python dependencies..." -ForegroundColor Yellow
 $pip = Join-Path $VENV "Scripts/pip.exe"
 & $pip install -r (Join-Path $SIDECAR_DIR "requirements.txt") -q
@@ -143,7 +117,7 @@ $pip = Join-Path $VENV "Scripts/pip.exe"
 & $pip install PyPDF2 e2b-code-interpreter langchain-core -q
 Write-Host "[OK] Dependencies installed" -ForegroundColor Green
 
-# ── 6. .env file ──
+# ── 7. .env file ──
 $envFile = Join-Path $SIDECAR_DIR ".env"
 if (-not (Test-Path $envFile)) {
     Copy-Item (Join-Path $SIDECAR_DIR ".env.example") $envFile

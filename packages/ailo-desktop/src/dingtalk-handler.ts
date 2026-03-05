@@ -84,7 +84,7 @@ export class DingTalkHandler implements EndpointHandler {
     const isPrivate = chatType === "私聊";
 
     const tags: ContextTag[] = [
-      { kind: "channel", value: "钉钉", groupWith: true },
+      { kind: "channel", value: "dingtalk", groupWith: true },
       { kind: "conv_type", value: chatType, groupWith: false },
       { kind: "chat_id", value: chatId, groupWith: true, passToTool: true },
     ];

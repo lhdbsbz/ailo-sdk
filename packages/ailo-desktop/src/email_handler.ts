@@ -245,7 +245,7 @@ export class EmailHandler {
     const attachments = await this.saveAttachments(parsed);
 
     const contextTags: ContextTag[] = [
-      { kind: "channel", value: "邮件", groupWith: true },
+      { kind: "channel", value: "email", groupWith: true },
       { kind: "conv_type", value: "私聊", groupWith: true },
       { kind: "chat_id", value: fromAddr, groupWith: true, passToTool: true },
       { kind: "participant", value: fromName, groupWith: false },

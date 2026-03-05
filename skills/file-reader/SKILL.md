@@ -27,6 +27,6 @@ description: 读取和摘要文本类文件（txt, md, json, yaml, csv, log, 代
 
 以下文件不由本 Skill 处理：
 - PDF → 使用 `pdf-processing` Skill
-- Word/Excel/PPT → 使用 `document-editing` / `spreadsheet` / `presentation` Skill
+- Word/Excel/PPT → 使用 `spreadsheet` Skill（Excel）
 - 图片、音频、视频 → 使用 `screenshot` 或 `send_file`
 - 二进制文件 → 不支持

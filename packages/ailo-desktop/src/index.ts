@@ -305,7 +305,11 @@ const requireQQ = () => requireHandler(qqHandler, "QQ");
 
 function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> {
   const handlers: Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> = {
-    screenshot: async (args) => takeScreenshot(!!args.capture_window),
+    screenshot: async (args) =>
+      takeScreenshot({
+        capture_window: !!args.capture_window,
+        screen: args.screen as number | "all" | undefined,
+      }),
     get_current_time: async () => getCurrentTime(),
     browser_use: async (args) => browserUse(args),
     execute_code: async (args) => {
@@ -538,7 +542,7 @@ async function main(): Promise<void> {
               return mcpManager.executeToolCall(serverName, toolName, args);
             }
           }
-          return null;
+          throw new Error(`unknown tool: ${name}`);
         },
         skills,
         onConnectFailure: async (err, client) => {

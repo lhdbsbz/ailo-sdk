@@ -58,13 +58,11 @@ function readFile(args: Args): string {
   let content: string;
   if (stat.size > MAX_READ_BYTES) {
     const fd = fs.openSync(filePath, "r");
-    const buf = Buffer.alloc(Math.min(MAX_READ_BYTES, stat.size));
+    const buf = Buffer.alloc(MAX_READ_BYTES);
     fs.readSync(fd, buf, 0, buf.length, 0);
     fs.closeSync(fd);
     content = buf.toString("utf-8");
-    if (stat.size > MAX_READ_BYTES) {
-      content += `\n...[文件已截断，共 ${stat.size} 字节，仅显示前 ${MAX_READ_BYTES} 字节。可用 offset/limit 分页读取]`;
-    }
+    content += `\n...[文件已截断，共 ${stat.size} 字节，仅显示前 ${MAX_READ_BYTES} 字节。可用 offset/limit 分页读取]`;
   } else {
     content = fs.readFileSync(filePath, "utf-8");
   }

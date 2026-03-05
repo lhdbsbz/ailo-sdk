@@ -12,7 +12,6 @@ import type {
   IntentPayload,
   ToolRequestPayload,
   StreamPayload,
-  MediaPushPayload,
   ToolCapability,
   SkillMeta,
   HealthStatus,
@@ -77,7 +76,7 @@ export type WorldEnrichmentHandler = (payload: WorldEnrichmentPayload) => void;
 export type StreamHandler = (payload: StreamPayload) => void;
 export type SignalHandler = (signal: string, data: unknown) => void;
 export type EvictedHandler = () => void;
-export type MediaPushHandler = (payload: MediaPushPayload) => void | Promise<void>;
+
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -144,7 +143,6 @@ export class EndpointClient implements EndpointStorage {
   private streamHandler: StreamHandler | null = null;
   private signalHandlers = new Map<string, SignalHandler[]>();
   private evictedHandler: EvictedHandler | null = null;
-  private mediaPushHandlers: MediaPushHandler[] = [];
   private fsProbeMarker: FsProbeMarker | null = null;
   private reconnectWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
@@ -258,12 +256,6 @@ export class EndpointClient implements EndpointStorage {
     const list = this.signalHandlers.get(signal) ?? [];
     list.push(handler);
     this.signalHandlers.set(signal, list);
-    return this;
-  }
-
-  /** Register a handler for media_push events (server pushes a file to this endpoint). */
-  onMediaPush(handler: MediaPushHandler): this {
-    this.mediaPushHandlers.push(handler);
     return this;
   }
 
@@ -504,15 +496,6 @@ export class EndpointClient implements EndpointStorage {
       case "stream": {
         const payload = frame.payload as StreamPayload;
         this.streamHandler?.(payload);
-        break;
-      }
-      case "media_push": {
-        const payload = frame.payload as MediaPushPayload;
-        for (const handler of this.mediaPushHandlers) {
-          Promise.resolve(handler(payload)).catch((err) => {
-            console.error("[endpoint] media_push handler error:", err);
-          });
-        }
         break;
       }
       case "file_fetch": {

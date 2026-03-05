@@ -18,11 +18,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ── Ensure external tools (poppler, LibreOffice) are on PATH ─────────────────
+# ── Ensure external tools (poppler) are on PATH ──────────────────────────────
 
 def _inject_tool_paths():
-    """Add poppler and LibreOffice to PATH at process level so subprocess
-    calls inside ClawWork's evaluator can find pdftoppm / soffice."""
+    """Add poppler to PATH at process level so subprocess
+    calls inside ClawWork's evaluator can find pdftoppm."""
     extra: list[str] = []
 
     poppler_candidates = [
@@ -35,10 +35,6 @@ def _inject_tool_paths():
                 if "pdftoppm.exe" in files:
                     extra.append(root)
                     break
-
-    lo_path = r"C:\Program Files\LibreOffice\program"
-    if os.path.isfile(os.path.join(lo_path, "soffice.exe")):
-        extra.append(lo_path)
 
     if extra:
         current = os.environ.get("PATH", "")
@@ -93,9 +89,7 @@ print(f"  GDPVal dataset : {GDPVAL_PATH}")
 print(f"  Agent data     : {AGENT_DIR}")
 
 _pdftoppm = shutil.which("pdftoppm")
-_soffice = shutil.which("soffice")
 print(f"  pdftoppm       : {_pdftoppm or '❌ NOT FOUND'}")
-print(f"  soffice        : {_soffice or '❌ NOT FOUND'}")
 print()
 
 # TaskManager
