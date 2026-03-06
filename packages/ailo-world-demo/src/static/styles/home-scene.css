@@ -1,0 +1,498 @@
+.home-floor {
+  position: absolute;
+  inset: 20px 18px 18px;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  grid-template-rows: 1fr 0.92fr;
+  gap: 10px;
+}
+
+.room {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), 0 18px 28px rgba(0,0,0,0.16);
+  background: linear-gradient(180deg, rgba(239, 225, 203, 0.97), rgba(217, 197, 170, 0.94));
+  background-size: cover;
+  background-position: center;
+}
+
+.living-room {
+  background-image: url(/static/assets/scenes/home-living-room.png);
+}
+
+.bed-room {
+  background-image: url(/static/assets/scenes/home-bedroom.png);
+}
+
+.entry-room {
+  background-image: url(/static/assets/scenes/home-entryway.png);
+}
+
+.room::before {
+  display: none;
+}
+
+.living-room { grid-row: 1 / 3; }
+.bed-room { grid-column: 2 / 3; }
+.entry-room { grid-column: 2 / 3; grid-row: 2 / 3; }
+
+.room-wall {
+  position: absolute;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(248, 243, 230, 0.95), rgba(208, 190, 163, 0.86));
+  box-shadow: inset 0 -1px 0 rgba(88, 61, 33, 0.14);
+}
+
+.wall-top {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 12%;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+}
+
+.wall-left {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 9%;
+  border-top-right-radius: 14px;
+  border-bottom-right-radius: 14px;
+}
+
+.wall-right {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6%;
+  background: linear-gradient(180deg, rgba(225, 210, 190, 0.92), rgba(186, 171, 152, 0.88));
+}
+
+.room-overlay-dark {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(4, 8, 18, 0.58);
+  opacity: 1;
+  transition: opacity 900ms ease;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.room.light-on > .room-overlay-dark {
+  opacity: 0.08;
+}
+
+.room.curtain-open > .room-overlay-dark {
+  opacity: 0.22;
+}
+
+.room.light-on.curtain-open > .room-overlay-dark {
+  opacity: 0.04;
+}
+
+.room-overlay-warm {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 52% 30%, rgba(255, 220, 150, 0.42), transparent 72%);
+  opacity: 0;
+  transition: opacity 900ms ease;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.room.light-on > .room-overlay-warm {
+  opacity: var(--light-alpha, 0);
+}
+
+.room-overlay-cool {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(140, 200, 255, 0.12), transparent 50%);
+  opacity: 0;
+  transition: opacity 800ms ease;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.room.ac-on > .room-overlay-cool {
+  opacity: 1;
+}
+
+.room-overlay-music {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 20% 78%, rgba(139, 92, 246, 0.12), transparent 55%);
+  opacity: 0;
+  transition: opacity 800ms ease;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.room.music-on > .room-overlay-music {
+  opacity: 1;
+}
+
+.vacuum-trail {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(86, 170, 255, 0.18), transparent 70%);
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 600ms ease, left 400ms ease, top 400ms ease;
+}
+
+.vacuum-trail.visible {
+  opacity: 1;
+}
+
+.room-overlay-sunbeam {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, transparent 15%, rgba(255, 235, 160, 0.32) 35%, rgba(255, 248, 200, 0.18) 55%, transparent 75%),
+    radial-gradient(ellipse at 75% 25%, rgba(255, 240, 180, 0.25), transparent 55%);
+  opacity: 0;
+  transition: opacity 1200ms ease;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.room.curtain-open > .room-overlay-sunbeam {
+  opacity: 1;
+  animation: sunShimmer 4s ease-in-out infinite;
+}
+
+@keyframes sunShimmer {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+.ceiling-light {
+  position: absolute;
+  z-index: 7;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: radial-gradient(circle at center, #fff4c9 0 45%, #d7b874 46% 100%);
+  box-shadow: 0 0 0 6px rgba(255, 235, 170, 0.06);
+}
+
+.living-light { left: 52%; top: 12%; }
+.bed-light { left: 52%; top: 13%; }
+
+.window {
+  position: absolute;
+  top: 11%;
+  right: 8%;
+  width: 16%;
+  height: 44%;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(166, 217, 255, 0.95), rgba(79, 136, 204, 0.72));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
+  overflow: hidden;
+  z-index: 2;
+}
+
+.curtain-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: linear-gradient(180deg, rgba(223, 231, 241, 0.95), rgba(188, 201, 220, 0.98));
+  transition: width 900ms ease;
+}
+
+.curtain-left { left: 0; }
+.curtain-right { right: 0; }
+
+.sunbeam {
+  position: absolute;
+  right: 14%;
+  top: 24%;
+  width: 36%;
+  height: 44%;
+  transform: skewX(-24deg);
+  background: linear-gradient(180deg, rgba(255, 239, 182, 0.34), transparent 74%);
+  opacity: 0;
+  transition: opacity 900ms ease;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.sunbeam.open { opacity: 1; }
+
+.furniture {
+  position: absolute;
+  z-index: 2;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+.living-rug {
+  position: absolute;
+  z-index: 2;
+  left: 19%;
+  bottom: 13%;
+  width: 50%;
+  height: 21%;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(177, 102, 96, 0.28), rgba(122, 61, 61, 0.22));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+.sofa-main {
+  left: 15%;
+  top: 35%;
+  width: 30%;
+  height: 16%;
+  background: linear-gradient(180deg, #7f6b59, #5f4c3d);
+}
+
+.sofa-chaise {
+  left: 31%;
+  top: 50%;
+  width: 18%;
+  height: 16%;
+  background: linear-gradient(180deg, #75614f, #554233);
+}
+
+.sofa-back {
+  left: 14%;
+  top: 28%;
+  width: 32%;
+  height: 7%;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #907966, #6b5646);
+}
+
+.coffee-table {
+  left: 34%;
+  top: 49%;
+  width: 16%;
+  height: 10%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #b98e63, #8b6747);
+}
+
+.media-console {
+  right: 17%;
+  top: 24%;
+  width: 14%;
+  height: 10%;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #353b4e, #191e2b);
+}
+
+.tv-panel {
+  right: 18%;
+  top: 14%;
+  width: 12%;
+  height: 10%;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #0d1524, #192744);
+  box-shadow: 0 12px 20px rgba(0,0,0,0.18);
+}
+
+.floor-lamp {
+  left: 10%;
+  top: 19%;
+  width: 5px;
+  height: 30%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #8b8f96, #5d646f);
+}
+
+.floor-lamp::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: -10px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: radial-gradient(circle at center, rgba(255, 243, 196, 0.95), rgba(214, 176, 87, 0.96));
+}
+
+.side-plant {
+  left: 58%;
+  bottom: 18%;
+  width: 12px;
+  height: 20px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #3e7f55, #234e33);
+}
+
+.side-plant::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: -16px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50% 50% 45% 45%;
+  background: radial-gradient(circle at 40% 40%, #64b17f, #2e6b43);
+}
+
+.bed-base {
+  left: 16%;
+  top: 30%;
+  width: 52%;
+  height: 26%;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #d7dce6, #b7c0d2);
+  box-shadow: 0 14px 22px rgba(0,0,0,0.16);
+}
+
+.bed-headboard {
+  left: 14%;
+  top: 26%;
+  width: 56%;
+  height: 7%;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #8c6f63, #6a5146);
+}
+
+.pillow {
+  position: absolute;
+  z-index: 3;
+  top: 33%;
+  width: 12%;
+  height: 9%;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfcff, #dfe6f3);
+}
+
+.pillow-left { left: 21%; }
+.pillow-right { left: 38%; }
+
+.nightstand {
+  left: 74%;
+  top: 39%;
+  width: 12%;
+  height: 12%;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #947765, #6c5442);
+}
+
+.wardrobe {
+  right: 10%;
+  top: 20%;
+  width: 17%;
+  height: 46%;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #9a7f6e, #735b4d);
+}
+
+.entry-floor-shadow {
+  position: absolute;
+  inset: auto 10% 10% 12%;
+  height: 18%;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(72, 48, 28, 0.12), rgba(72, 48, 28, 0.02));
+  z-index: 1;
+}
+
+.shoe-cabinet {
+  left: 46%;
+  bottom: 18%;
+  width: 18%;
+  height: 18%;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #8a6c57, #5f4738);
+}
+
+.fridge-tall {
+  right: 11%;
+  bottom: 12%;
+  width: 19%;
+  height: 34%;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #d7e1ef, #aab8cc);
+}
+
+.washer-box {
+  left: 72%;
+  bottom: 14%;
+  width: 14%;
+  height: 24%;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #e6edf6, #b7c2d2);
+}
+
+.washer-box::after {
+  content: "";
+  position: absolute;
+  inset: 18% 22%;
+  border-radius: 999px;
+  background: radial-gradient(circle at center, #7385a8, #2b3649);
+}
+
+.door {
+  position: absolute;
+  z-index: 3;
+  left: 14%;
+  top: 18%;
+  width: 16%;
+  height: 55%;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #855f34, #5d4021);
+  transform-origin: left center;
+  transition: transform 700ms ease;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.25);
+}
+
+.door.unlocked {
+  transform: perspective(300px) rotateY(-45deg);
+}
+
+.door-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 35% 50%, rgba(114, 183, 255, 0.18), transparent 55%);
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+
+.door.unlocked .door-glow { opacity: 1; }
+
+.robot-dock {
+  position: absolute;
+  left: 11%;
+  bottom: 15%;
+  width: 18%;
+  height: 7%;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #253246, #131b28);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  z-index: 2;
+}
+
+.room-wall,
+.furniture,
+.living-rug,
+.robot-dock,
+.entry-floor-shadow,
+.shoe-cabinet,
+.fridge-tall,
+.washer-box,
+.window,
+.sunbeam,
+.ceiling-light,
+.door {
+  display: none;
+}
+
+.room-label {
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+}

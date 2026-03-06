@@ -50,7 +50,8 @@ async function promptPort(): Promise<number> {
   }
 }
 
-import { takeScreenshot } from "./screenshot.js";
+import { DesktopStateStore } from "./desktop_state_store.js";
+import { captureDesktopObservation } from "./screenshot.js";
 import { execTool } from "./exec_tool.js";
 import { fsTool } from "./fs_tools.js";
 import { LocalMCPManager } from "./mcp_manager.js";
@@ -162,6 +163,7 @@ let feishuHandler: FeishuHandler | null = null;
 let dingtalkHandler: DingTalkHandler | null = null;
 let qqHandler: QQHandler | null = null;
 let lastMcpToolSnapshot: Map<string, ToolCapability> = new Map();
+const desktopStateStore = new DesktopStateStore();
 
 function computeToolDiff(oldTools: Map<string, ToolCapability>, newTools: ToolCapability[]): {
   register: ToolCapability[];
@@ -305,11 +307,14 @@ const requireQQ = () => requireHandler(qqHandler, "QQ");
 
 function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> {
   const handlers: Record<string, (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>> = {
-    screenshot: async (args) =>
-      takeScreenshot({
+    screenshot: async (args) => {
+      const result = await captureDesktopObservation({
         capture_window: !!args.capture_window,
         screen: args.screen as number | "all" | undefined,
-      }),
+      });
+      if (result.observation) desktopStateStore.saveObservation(result.observation);
+      return result.parts;
+    },
     get_current_time: async () => getCurrentTime(),
     browser_use: async (args) => browserUse(args),
     execute_code: async (args) => {
@@ -320,7 +325,7 @@ function buildToolHandlers(): Record<string, (args: Record<string, unknown>) => 
       if (!endpointCtx) throw new Error("端点未就绪");
       return execTool(endpointCtx, args);
     },
-    mouse_keyboard: async (args) => mouseKeyboard(args),
+    mouse_keyboard: async (args) => mouseKeyboard(args, { stateStore: desktopStateStore }),
     mcp_manage: async (args) => {
       const result = await mcpManager.handle(args);
       if (result.toolsChanged) syncMcpToolsToServer();

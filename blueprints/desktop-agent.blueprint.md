@@ -4,7 +4,7 @@ version: 1.2.0
 description: 桌面 Agent，提供截图、浏览器自动化、文件系统、命令执行、代码执行、定时任务和本地 MCP 管理能力
 tools:
   - name: screenshot
-    description: 在端点上截取桌面屏幕，返回图片供视觉分析。返回文案会注明当前是第几块/共几块屏，多显示器时可用 screen（0-based）指定截取某块。不传 screen 则截取全部。macOS 支持 capture_window 选择窗口截图
+    description: 在端点上截取桌面屏幕，返回图片与结构化 observation 供视觉分析。返回文本里会附带 observation_id、scope、coordinate_space 等字段，多显示器时可用 screen（0-based）指定截取某块。不传 screen 则截取全部。macOS 支持 capture_window 选择窗口截图
     timeout: 15
     parameters:
       type: object
@@ -204,7 +204,7 @@ tools:
       required: [action]
 
   - name: mouse_keyboard
-    description: 在端点上控制鼠标和键盘进行桌面 GUI 操作。通常先 screenshot 获取界面，分析目标位置后传入坐标。支持像素坐标(x/y)和归一化坐标(norm_x/norm_y, 0-1000)。screenshot_after=true 可操作后自动截图验证
+    description: 在端点上控制鼠标和键盘进行桌面 GUI 操作。先 screenshot 获取 observation，再在 mouse_keyboard 中通过 observation_id 绑定到该次观察。支持 observation 局部像素坐标(x/y)和归一化坐标(norm_x/norm_y, 0-1000)。verify_after_action=true 时会在动作后自动重新观察并返回 verdict
     timeout: 10
     parameters:
       type: object
@@ -213,24 +213,27 @@ tools:
           type: string
           enum: [click, double_click, right_click, move, drag, type, hotkey, scroll, get_screen_size]
           description: "动作：click/双击/右键/移动/拖拽/输入/快捷键/滚动，或 get_screen_size 获取屏幕尺寸（用于 norm 坐标换算）"
-        x: { type: number, description: "X 像素坐标" }
-        y: { type: number, description: "Y 像素坐标" }
-        norm_x: { type: number, description: "归一化 X 坐标 (0-1000)" }
-        norm_y: { type: number, description: "归一化 Y 坐标 (0-1000)" }
+        observation_id: { type: string, description: "必须绑定到最近一次 screenshot 返回的 observation_id" }
+        x: { type: number, description: "基于 observation 视图的局部 X 像素坐标" }
+        y: { type: number, description: "基于 observation 视图的局部 Y 像素坐标" }
+        norm_x: { type: number, description: "基于 observation 视图的归一化 X 坐标 (0-1000)" }
+        norm_y: { type: number, description: "基于 observation 视图的归一化 Y 坐标 (0-1000)" }
         button: { type: string, enum: [left, right, middle], description: "鼠标按键（默认 left）" }
-        start_x: { type: number, description: "拖拽起点 X 像素" }
-        start_y: { type: number, description: "拖拽起点 Y 像素" }
-        end_x: { type: number, description: "拖拽终点 X 像素" }
-        end_y: { type: number, description: "拖拽终点 Y 像素" }
-        start_norm_x: { type: number, description: "拖拽起点归一化 X" }
-        start_norm_y: { type: number, description: "拖拽起点归一化 Y" }
-        end_norm_x: { type: number, description: "拖拽终点归一化 X" }
-        end_norm_y: { type: number, description: "拖拽终点归一化 Y" }
+        start_x: { type: number, description: "基于 observation 视图的拖拽起点 X 像素" }
+        start_y: { type: number, description: "基于 observation 视图的拖拽起点 Y 像素" }
+        end_x: { type: number, description: "基于 observation 视图的拖拽终点 X 像素" }
+        end_y: { type: number, description: "基于 observation 视图的拖拽终点 Y 像素" }
+        start_norm_x: { type: number, description: "基于 observation 视图的拖拽起点归一化 X" }
+        start_norm_y: { type: number, description: "基于 observation 视图的拖拽起点归一化 Y" }
+        end_norm_x: { type: number, description: "基于 observation 视图的拖拽终点归一化 X" }
+        end_norm_y: { type: number, description: "基于 observation 视图的拖拽终点归一化 Y" }
         text: { type: string, description: "输入文本（action=type）" }
         keys: { type: string, description: "快捷键组合，空格分隔（如 ctrl c）" }
         direction: { type: string, enum: [up, down], description: "滚动方向" }
         amount: { type: number, description: "滚动量（默认 3）" }
-        screenshot_after: { type: boolean, description: "操作后自动截图（默认 false）" }
+        verify_after_action: { type: boolean, description: "动作后自动重新观察并返回 verdict（默认 false）" }
+        verification_delay_ms: { type: number, description: "动作后等待多少毫秒再重新观察，默认 150" }
+        screenshot_after: { type: boolean, description: "verify_after_action 的兼容别名，不建议继续新增使用" }
       required: [action]
 ---
 
@@ -241,7 +244,12 @@ tools:
 ## 工具说明
 
 ### screenshot
-截取桌面屏幕。返回文案会注明「第 X 块/共 Y 块屏」，多显示器时可根据提示用 `screen=0`、`screen=1` 等分别截取。不传 `screen` 则截取全部。截图通过 tool_response.content 以 image ContentPart 返回。
+截取桌面屏幕。返回文案会注明「第 X 块/共 Y 块屏」，多显示器时可根据提示用 `screen=0`、`screen=1` 等分别截取。不传 `screen` 则截取全部。截图通过 tool_response.content 以 image ContentPart 返回，同时文本部分会提供结构化 observation 信息，至少包含：
+- `observation_id`
+- `scope`
+- `coordinate_space`
+- `image_width`
+- `image_height`
 macOS 支持 `capture_window=true` 选择窗口截图。
 
 ### get_current_time
@@ -277,15 +285,24 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 
 ### mouse_keyboard
 控制桌面鼠标和键盘，用于 GUI 自动化操作。支持两种坐标输入：
-- 像素坐标（`x`/`y`）：直接指定屏幕像素位置
-- 归一化坐标（`norm_x`/`norm_y`，0-1000）：由视觉模型输出，工具内自动转换为实际像素
+- 局部像素坐标（`x`/`y`）：基于 `observation_id` 对应截图的局部像素位置
+- 归一化坐标（`norm_x`/`norm_y`，0-1000）：基于 `observation_id` 对应截图的归一化坐标
 
 典型 GUI 操作流程：
 1. `screenshot`：截取当前屏幕，获取界面图像
-2. 分析截图确定目标元素的坐标
-3. `mouse_keyboard(action=click, norm_x=197, norm_y=525, screenshot_after=true)`：执行点击并自动截图验证
+2. 从文本响应里读取 `observation_id`
+3. 分析截图确定目标元素在该次 observation 中的坐标
+4. `mouse_keyboard(action=click, observation_id="...", norm_x=197, norm_y=525, verify_after_action=true)`：执行点击并自动重新观察
 
-`screenshot_after=true` 时操作完成后自动截图返回，可省去额外的 screenshot 调用。
+当 `verify_after_action=true` 时，工具会返回：
+- `action_result`：动作是否被接受、是否执行、绑定了哪个 observation
+- `verdict`：`success / failure / uncertain`
+- `after_observation`：动作后的新 observation 和截图
+
+约束：
+- 凡是视觉动作，都应绑定 `observation_id`
+- observation 过期或 scope 不匹配时，工具会拒绝执行
+- `ActionResult` 不等于成功，必须看 `verdict`
 
 ## 约束
 - screenshot 需要操作系统权限（macOS 需屏幕录制权限）

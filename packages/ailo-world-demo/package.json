@@ -1,0 +1,22 @@
+{
+  "name": "@lmcl/ailo-world-demo",
+  "version": "1.0.0",
+  "description": "Ailo World Demo - 一个意识，万物互联",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && node copy-static.mjs",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@lmcl/ailo-endpoint-sdk": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

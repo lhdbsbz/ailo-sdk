@@ -1,0 +1,180 @@
+.world-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1.7fr 1.1fr 1fr 1fr;
+  grid-template-rows: 1.12fr 0.98fr 0.92fr;
+  padding: 8px 18px 18px;
+}
+
+.scene-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(15, 24, 39, 0.88), rgba(9, 14, 23, 0.98)),
+    radial-gradient(circle at top right, rgba(90, 127, 255, 0.08), transparent 28%);
+  border: 1px solid rgba(126, 158, 212, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 38px rgba(0,0,0,0.26);
+}
+
+.scene-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 42%;
+  background: linear-gradient(180deg, transparent, rgba(3, 7, 14, 0.32));
+  pointer-events: none;
+}
+
+.scene-card.home { grid-column: 1 / 2; grid-row: 1 / 3; }
+.scene-card.office { grid-column: 2 / 5; grid-row: 1 / 2; }
+.scene-card.hotel { grid-column: 2 / 5; grid-row: 2 / 3; }
+.scene-card.car { grid-column: 1 / 2; grid-row: 3 / 4; }
+.scene-card.hospital { grid-column: 2 / 3; grid-row: 3 / 4; }
+.scene-card.city { grid-column: 3 / 4; grid-row: 3 / 4; }
+.scene-card.factory { grid-column: 4 / 5; grid-row: 3 / 4; }
+
+.scene-header {
+  position: absolute;
+  inset: 12px auto auto 14px;
+  z-index: 8;
+}
+
+.scene-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.scene-sub {
+  color: rgba(232, 241, 255, 0.72);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.scene-body {
+  position: absolute;
+  inset: 0;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.env-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 6;
+  transition: background 900ms ease, opacity 900ms ease;
+}
+
+.env-overlay.dim {
+  background: rgba(4, 8, 18, 0.44);
+}
+
+.env-overlay.warm {
+  background: radial-gradient(ellipse at 40% 35%, rgba(255, 220, 150, 0.28), transparent 65%);
+}
+
+.env-overlay.cool {
+  background: linear-gradient(180deg, rgba(120, 190, 255, 0.14), transparent 45%);
+}
+
+.env-overlay.headlight {
+  background: radial-gradient(ellipse at 38% 48%, rgba(180, 220, 255, 0.22), transparent 50%);
+}
+
+.env-overlay.night {
+  background: rgba(6, 10, 22, 0.38);
+}
+
+.env-overlay.sunbeam-fx {
+  background: linear-gradient(135deg, transparent 20%, rgba(255, 235, 160, 0.25) 40%, rgba(255, 248, 200, 0.12) 60%, transparent 80%);
+  animation: sunShimmer 4s ease-in-out infinite;
+}
+
+@keyframes sunShimmer {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+.scene-card.office > .scene-body {
+  background-image: url(/static/assets/scenes/scene-office.png);
+  background-color: #1a2233;
+}
+
+.scene-card.hotel > .scene-body {
+  background-image: url(/static/assets/scenes/scene-hotel.png);
+  background-color: #1e1a16;
+}
+
+.scene-card.car > .scene-body {
+  background-image: url(/static/assets/scenes/scene-car.png);
+  background-color: #151a28;
+}
+
+.scene-card.hospital > .scene-body {
+  background-image: url(/static/assets/scenes/scene-hospital.png);
+  background-color: #1a2130;
+}
+
+.scene-card.city > .scene-body {
+  background-image: url(/static/assets/scenes/scene-city.png);
+  background-color: #1a2822;
+}
+
+.scene-card.factory > .scene-body {
+  background-image: url(/static/assets/scenes/scene-factory.png);
+  background-color: #1e2028;
+}
+
+.status-badge {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 8;
+  font-size: 11px;
+  color: rgba(235,242,255,0.84);
+  background: rgba(9, 15, 25, 0.44);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 5px 8px;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+}
+
+.room-label {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  z-index: 7;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(72, 55, 33, 0.78);
+  letter-spacing: 0.04em;
+}
+
+.room-card,
+.hall,
+.pool,
+.factory-floor {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), 0 18px 28px rgba(0,0,0,0.16);
+}
+
+.room-card::before,
+.hall::before,
+.pool::before,
+.factory-floor::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), transparent 24%);
+  pointer-events: none;
+}

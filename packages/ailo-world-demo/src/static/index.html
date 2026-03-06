@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ailo World Demo</title>
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/world-layout.css">
+  <link rel="stylesheet" href="/static/styles/home-scene.css">
+  <link rel="stylesheet" href="/static/styles/secondary-scenes.css">
+  <link rel="stylesheet" href="/static/styles/devices.css">
+  <link rel="stylesheet" href="/static/styles/panels.css">
+</head>
+<body>
+  <div class="screen-glow"></div>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Ailo World Demo</h1>
+      <p>一个意识，贯穿一个人生活里的所有空间与身体</p>
+    </div>
+    <form id="connect-form" class="connect-form">
+      <label>
+        Ailo WS
+        <input id="ailo-ws-url" type="text" value="ws://localhost:19800/ws" />
+      </label>
+      <label>
+        API Key
+        <input id="ailo-api-key" type="text" placeholder="ailo_ep_xxx" />
+      </label>
+      <button type="submit">连接全部设备</button>
+      <button type="button" id="disconnect-btn" class="ghost">断开</button>
+      <button type="button" id="reset-btn" class="ghost danger">一键重置</button>
+    </form>
+  </header>
+
+  <section class="scenario-row">
+    <div class="scenario-title">时间线场景</div>
+    <div id="scenario-list" class="scenario-list"></div>
+  </section>
+
+  <main class="layout">
+    <section class="world">
+      <div class="world-header">
+        <div>
+          <div class="world-title">Ailo Living World</div>
+          <div class="world-subtitle">不是后台看板，而是一个真实生活空间</div>
+        </div>
+        <div class="core-chip">
+          <span class="core-dot"></span>
+          <span id="connected-count" class="muted"></span>
+        </div>
+      </div>
+      <div id="world-stage" class="world-stage"></div>
+    </section>
+    <aside class="sidebar">
+      <div class="panel panel-devices">
+        <div class="panel-header">
+          <span>Endpoint 列表</span>
+          <span class="muted">一设备一连接</span>
+        </div>
+        <div id="device-list" class="device-list"></div>
+      </div>
+      <div class="panel panel-logs">
+        <div class="panel-header">
+          <span>实时日志</span>
+          <button id="clear-log-btn" class="ghost small">清空</button>
+        </div>
+        <div id="log-list" class="log-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

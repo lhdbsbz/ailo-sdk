@@ -1,7 +1,10 @@
 import { spawnSync } from "child_process";
 import * as os from "os";
 import type { ContentPart } from "@lmcl/ailo-endpoint-sdk";
-import { takeScreenshot } from "./screenshot.js";
+import { DesktopStateStore } from "./desktop_state_store.js";
+import { verifyDesktopAction } from "./desktop_verifier.js";
+import type { DesktopActionResult, DesktopObservation, DesktopVerdict } from "./desktop_types.js";
+import { captureDesktopObservation } from "./screenshot.js";
 
 function ok(data: Record<string, unknown>): ContentPart[] {
   return [{ type: "text", text: JSON.stringify({ ok: true, ...data }, null, 2) }];
@@ -21,7 +24,7 @@ function runShell(cmd: string): string {
   return (r.stdout ?? "").trim();
 }
 
-function getScreenSize(): { width: number; height: number } {
+function getPrimaryScreenSize(): { width: number; height: number } {
   const platform = os.platform();
   if (platform === "win32") {
     const ps = `Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; Write-Output "$($s.Width)x$($s.Height)"`;
@@ -38,20 +41,6 @@ function getScreenSize(): { width: number; height: number } {
     if (m) return { width: Number(m[1]), height: Number(m[2]) };
   }
   return { width: 1920, height: 1080 };
-}
-
-function resolveCoordinates(args: Record<string, unknown>): [number, number] {
-  if (args.x !== undefined && args.y !== undefined) {
-    return [args.x as number, args.y as number];
-  }
-  if (args.norm_x !== undefined && args.norm_y !== undefined) {
-    const size = getScreenSize();
-    return [
-      Math.round(size.width * (args.norm_x as number) / 1000),
-      Math.round(size.height * (args.norm_y as number) / 1000),
-    ];
-  }
-  throw new Error("需要提供 x/y（像素坐标）或 norm_x/norm_y（归一化坐标 0-1000）");
 }
 
 // ---------------------------------------------------------------------------
@@ -217,90 +206,300 @@ function mouseScroll(direction: string, amount: number): void {
 // 入口
 // ---------------------------------------------------------------------------
 
-async function appendScreenshot(result: ContentPart[], doScreenshot: boolean): Promise<ContentPart[]> {
-  if (!doScreenshot) return result;
-  const screenshotParts = await takeScreenshot(false);
-  return [...result, ...screenshotParts];
+interface MouseKeyboardDeps {
+  stateStore?: DesktopStateStore;
 }
 
-export async function mouseKeyboard(args: Record<string, unknown>): Promise<ContentPart[]> {
-  const action = args.action as string;
+function normalizeAction(action: string): string {
+  return String(action ?? "").trim().toLowerCase();
+}
+
+function buildActionResult(result: DesktopActionResult, verdict?: DesktopVerdict, afterObservation?: DesktopObservation): ContentPart[] {
+  const payload: Record<string, unknown> = {
+    ok: result.accepted && result.executed,
+    action_result: {
+      accepted: result.accepted,
+      executed: result.executed,
+      action: result.action,
+      timestamp: result.timestamp,
+      observation_id: result.observationId,
+      error: result.error,
+      details: result.details,
+    },
+  };
+  if (verdict) payload.verdict = verdict;
+  if (afterObservation) {
+    payload.after_observation = {
+      observation_id: afterObservation.id,
+      scope: afterObservation.scope,
+      coordinate_space: afterObservation.coordinateSpace,
+      image_width: afterObservation.imageWidth,
+      image_height: afterObservation.imageHeight,
+      image_path: afterObservation.image.path,
+    };
+  }
+  const parts: ContentPart[] = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
+  if (afterObservation) {
+    parts.push({
+      type: "image",
+      media: {
+        type: "image",
+        path: afterObservation.image.path,
+        mime: afterObservation.image.mime,
+        name: afterObservation.image.name,
+      },
+    });
+  }
+  return parts;
+}
+
+function rejectAction(action: string, error: string): ContentPart[] {
+  return buildActionResult(
+    {
+      accepted: false,
+      executed: false,
+      action,
+      timestamp: Date.now(),
+      error,
+    },
+    { status: "failure", reason: error },
+  );
+}
+
+function resolveObservation(args: Record<string, unknown>, deps: MouseKeyboardDeps): DesktopObservation | null {
+  const stateStore = deps.stateStore;
+  if (!stateStore) return null;
+  const observationId = typeof args.observation_id === "string" ? args.observation_id.trim() : "";
+  if (!observationId) return null;
+  const observation = stateStore.getObservation(observationId);
+  if (!observation) throw new Error(`observation_id 无效或已过期: ${observationId}`);
+  if (stateStore.isExpired(observation)) throw new Error(`observation 已过期，请重新 screenshot: ${observationId}`);
+  return observation;
+}
+
+function requireObservation(action: string, args: Record<string, unknown>, deps: MouseKeyboardDeps): DesktopObservation {
+  const observation = resolveObservation(args, deps);
+  if (!observation) throw new Error(`${action} 需要 observation_id，请先调用 screenshot 获取 observation`);
+  return observation;
+}
+
+function resolvePointFromObservation(
+  observation: DesktopObservation,
+  args: Record<string, unknown>,
+  xKey: string,
+  yKey: string,
+  normXKey: string,
+  normYKey: string,
+): [number, number] {
+  const { bounds } = observation.scope;
+  if (args[xKey] !== undefined && args[yKey] !== undefined) {
+    return [
+      Math.round(bounds.x + Number(args[xKey])),
+      Math.round(bounds.y + Number(args[yKey])),
+    ];
+  }
+  if (args[normXKey] !== undefined && args[normYKey] !== undefined) {
+    return [
+      Math.round(bounds.x + bounds.width * Number(args[normXKey]) / 1000),
+      Math.round(bounds.y + bounds.height * Number(args[normYKey]) / 1000),
+    ];
+  }
+  throw new Error(`需要提供 ${xKey}/${yKey}（基于 observation 的局部像素坐标）或 ${normXKey}/${normYKey}（归一化坐标 0-1000）`);
+}
+
+async function captureVerificationObservation(observation: DesktopObservation, deps: MouseKeyboardDeps): Promise<DesktopObservation | null> {
+  const captureOpts = observation.scope.kind === "screen" && observation.scope.screenIndex !== undefined
+    ? { screen: observation.scope.screenIndex }
+    : false;
+  const result = await captureDesktopObservation(captureOpts);
+  if (!result.observation) return null;
+  deps.stateStore?.saveObservation(result.observation);
+  return result.observation;
+}
+
+export async function mouseKeyboard(args: Record<string, unknown>, deps: MouseKeyboardDeps = {}): Promise<ContentPart[]> {
+  const action = normalizeAction(args.action as string);
   if (!action) return fail("action 参数必填");
 
-  const screenshotAfter = !!args.screenshot_after;
+  const verifyAfterAction = args.verify_after_action !== false && !!(args.verify_after_action ?? args.screenshot_after);
+  const verificationDelayMs = Math.max(0, Number(args.verification_delay_ms ?? 150));
 
   try {
     switch (action) {
       case "get_screen_size": {
-        const size = getScreenSize();
+        const size = getPrimaryScreenSize();
         return ok(size);
       }
 
       case "click": {
-        const [x, y] = resolveCoordinates(args);
+        const observation = requireObservation(action, args, deps);
+        const [x, y] = resolvePointFromObservation(observation, args, "x", "y", "norm_x", "norm_y");
         mouseClick(x, y, (args.button as string) ?? "left");
-        return appendScreenshot(ok({ action: "click", x, y }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { x, y, button: (args.button as string) ?? "left" },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "double_click": {
-        const [x, y] = resolveCoordinates(args);
+        const observation = requireObservation(action, args, deps);
+        const [x, y] = resolvePointFromObservation(observation, args, "x", "y", "norm_x", "norm_y");
         mouseDoubleClick(x, y);
-        return appendScreenshot(ok({ action: "double_click", x, y }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { x, y },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "right_click": {
-        const [x, y] = resolveCoordinates(args);
+        const observation = requireObservation(action, args, deps);
+        const [x, y] = resolvePointFromObservation(observation, args, "x", "y", "norm_x", "norm_y");
         mouseClick(x, y, "right");
-        return appendScreenshot(ok({ action: "right_click", x, y }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { x, y },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "move": {
-        const [x, y] = resolveCoordinates(args);
+        const observation = requireObservation(action, args, deps);
+        const [x, y] = resolvePointFromObservation(observation, args, "x", "y", "norm_x", "norm_y");
         mouseMove(x, y);
-        return ok({ action: "move", x, y });
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { x, y },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        return buildActionResult(actionResult);
       }
 
       case "drag": {
-        let sx: number, sy: number, ex: number, ey: number;
-        if (args.start_norm_x !== undefined) {
-          const size = getScreenSize();
-          sx = Math.round(size.width * (args.start_norm_x as number) / 1000);
-          sy = Math.round(size.height * (args.start_norm_y as number) / 1000);
-          ex = Math.round(size.width * (args.end_norm_x as number) / 1000);
-          ey = Math.round(size.height * (args.end_norm_y as number) / 1000);
-        } else {
-          sx = args.start_x as number;
-          sy = args.start_y as number;
-          ex = args.end_x as number;
-          ey = args.end_y as number;
-        }
+        const observation = requireObservation(action, args, deps);
+        const [sx, sy] = resolvePointFromObservation(observation, args, "start_x", "start_y", "start_norm_x", "start_norm_y");
+        const [ex, ey] = resolvePointFromObservation(observation, args, "end_x", "end_y", "end_norm_x", "end_norm_y");
         mouseDrag(sx, sy, ex, ey);
-        return appendScreenshot(ok({ action: "drag", startX: sx, startY: sy, endX: ex, endY: ey }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { startX: sx, startY: sy, endX: ex, endY: ey },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "type": {
+        const observation = requireObservation(action, args, deps);
         const text = args.text as string;
-        if (!text) return fail("type 操作需要 text 参数");
+        if (!text) return rejectAction(action, "type 操作需要 text 参数");
         keyboardType(text);
-        return appendScreenshot(ok({ action: "type", text }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { text },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "hotkey": {
+        const observation = requireObservation(action, args, deps);
         const keys = args.keys as string;
-        if (!keys) return fail("hotkey 操作需要 keys 参数");
+        if (!keys) return rejectAction(action, "hotkey 操作需要 keys 参数");
         keyboardHotkey(keys);
-        return appendScreenshot(ok({ action: "hotkey", keys }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { keys },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       case "scroll": {
+        const observation = requireObservation(action, args, deps);
         const direction = (args.direction as string) ?? "down";
         const amount = (args.amount as number) ?? 3;
         if (args.x !== undefined || args.norm_x !== undefined) {
-          const [x, y] = resolveCoordinates(args);
+          const [x, y] = resolvePointFromObservation(observation, args, "x", "y", "norm_x", "norm_y");
           mouseMove(x, y);
         }
         mouseScroll(direction, amount);
-        return appendScreenshot(ok({ action: "scroll", direction, amount }), screenshotAfter);
+        const actionResult: DesktopActionResult = {
+          accepted: true,
+          executed: true,
+          action,
+          timestamp: Date.now(),
+          observationId: observation.id,
+          details: { direction, amount },
+        };
+        deps.stateStore?.setLastAction(actionResult);
+        if (!verifyAfterAction) return buildActionResult(actionResult);
+        if (verificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+        const afterObservation = await captureVerificationObservation(observation, deps);
+        const verdict = verifyDesktopAction({ beforeObservation: observation, afterObservation, actionResult });
+        deps.stateStore?.setLastVerdict(verdict);
+        return buildActionResult(actionResult, verdict, afterObservation ?? undefined);
       }
 
       default:
@@ -308,6 +507,6 @@ export async function mouseKeyboard(args: Record<string, unknown>): Promise<Cont
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return fail(msg);
+    return rejectAction(action, msg);
   }
 }

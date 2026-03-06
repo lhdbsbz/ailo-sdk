@@ -1,0 +1,121 @@
+.sidebar {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.panel {
+  border: 1px solid rgba(124, 147, 189, 0.12);
+  background: rgba(10, 16, 28, 0.58);
+  border-radius: 24px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(14px);
+  min-height: 0;
+}
+
+.panel-devices {
+  flex: 1;
+}
+
+.panel-logs {
+  flex: 1;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(124, 147, 189, 0.1);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.device-list {
+  overflow: auto;
+  padding: 6px 0 10px;
+}
+
+.scene-block { padding: 4px 0; }
+
+.scene-title {
+  padding: 8px 12px 5px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 7px 12px;
+}
+
+.device-row:hover { background: rgba(255, 255, 255, 0.025); }
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #44526a;
+  margin-top: 5px;
+}
+
+.status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.55);
+}
+
+.device-main { min-width: 0; }
+.device-name { font-size: 12px; }
+
+.device-summary {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.device-status {
+  font-size: 10px;
+  color: rgba(104, 166, 255, 0.82);
+  margin-top: 2px;
+}
+
+.device-endpoint {
+  font-family: Consolas, monospace;
+  color: rgba(148, 166, 198, 0.9);
+}
+
+.log-list {
+  overflow: auto;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  padding: 6px 8px 10px;
+  line-height: 1.6;
+  color: rgba(216, 228, 247, 0.8);
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 56px 16px 72px 1fr;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.88;
+  font-size: 10px;
+}
+
+.log-up { color: var(--success); }
+.log-down { color: #c084fc; }
+.log-info { color: #fbbf24; }
+.log-error { color: var(--danger); }
