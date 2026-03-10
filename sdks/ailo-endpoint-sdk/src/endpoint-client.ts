@@ -41,6 +41,36 @@ function resolveBlueprintPath(blueprint: string): string {
   }
   return path.resolve(blueprint);
 }
+
+function isContentParts(value: unknown): value is ContentPart[] {
+  return Array.isArray(value) && value.every(
+    (part) => typeof part === "object" && part !== null && "type" in part,
+  );
+}
+
+function stringifyToolResult(result: unknown): string {
+  if (typeof result === "string") return result;
+  try {
+    const json = JSON.stringify(result);
+    if (json !== undefined) return json;
+  } catch {}
+  return String(result);
+}
+
+function toToolResponseContent(result: unknown): ContentPart[] | undefined {
+  if (result === undefined) return undefined;
+  if (isContentParts(result)) return result;
+  return [{ type: "text", text: stringifyToolResult(result) }];
+}
+
+function jsonTextContent(value: unknown): ContentPart[] {
+  const text = JSON.stringify(value);
+  if (text === undefined) {
+    throw new Error("structured payload must be JSON-serializable");
+  }
+  return [{ type: "text", text }];
+}
+
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
@@ -224,7 +254,7 @@ export class EndpointClient implements EndpointStorage {
 
   // ─── Callback registration ──────────────────────────────────────────────────
 
-  /** Register a handler for incoming tool_request frames. The return value becomes tool_response.result. */
+  /** Register a handler for incoming tool_request frames. The return value becomes tool_response.content. */
   onToolRequest(handler: ToolRequestHandler): this {
     this.toolRequestHandler = handler;
     return this;
@@ -470,10 +500,11 @@ export class EndpointClient implements EndpointStorage {
         if (!this.toolRequestHandler || !payload?.id) return;
         void this.toolRequestHandler(payload)
           .then((result) => {
-            if (Array.isArray(result) && result.length > 0 && typeof result[0] === "object" && result[0] !== null && "type" in result[0]) {
-              return this.toolResponse({ id: payload.id, success: true, content: result as ContentPart[] });
-            }
-            return this.toolResponse({ id: payload.id, success: true, result });
+            return this.toolResponse({
+              id: payload.id,
+              success: true,
+              content: toToolResponseContent(result),
+            });
           })
           .catch((err: Error) =>
             this.toolResponse({ id: payload.id, success: false, error: err.message }),
@@ -639,7 +670,7 @@ export class EndpointClient implements EndpointStorage {
         return;
       }
       const result = await res.json() as Record<string, unknown>;
-      await this.toolResponse({ id: reqId, success: true, result });
+      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent(result) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[endpoint] file_fetch error:", msg);
@@ -682,7 +713,7 @@ export class EndpointClient implements EndpointStorage {
             }
           }),
       };
-      await this.toolResponse({ id: reqId, success: true, result });
+      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent(result) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[endpoint] dir_list error:", msg);
@@ -707,7 +738,7 @@ export class EndpointClient implements EndpointStorage {
         }
         fs.copyFileSync(payload.local_source, targetPath);
         const stat = fs.statSync(targetPath);
-        await this.toolResponse({ id: reqId, success: true, result: { size: stat.size } });
+        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ size: stat.size }) });
         return;
       }
 
@@ -722,7 +753,7 @@ export class EndpointClient implements EndpointStorage {
       }
       const buffer = Buffer.from(await res.arrayBuffer());
       fs.writeFileSync(targetPath, buffer);
-      await this.toolResponse({ id: reqId, success: true, result: { size: buffer.length } });
+      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ size: buffer.length }) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[endpoint] file_push error:", msg);
@@ -733,18 +764,18 @@ export class EndpointClient implements EndpointStorage {
   private async handleFsProbe(reqId: string, payload: FsProbeRequest): Promise<void> {
     try {
       if (!path.isAbsolute(payload.path)) {
-        await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } });
+        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) });
         return;
       }
       if (fs.existsSync(payload.path)) {
         const content = fs.readFileSync(payload.path, "utf-8");
-        await this.toolResponse({ id: reqId, success: true, result: { found: true, content } });
+        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: true, content }) });
       } else {
-        await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } });
+        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await this.toolResponse({ id: reqId, success: true, result: { found: false, content: "" } }).catch(() => {});
+      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) }).catch(() => {});
       console.error("[endpoint] fs_probe error:", msg);
     }
   }

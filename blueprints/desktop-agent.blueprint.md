@@ -1,7 +1,7 @@
 ---
 name: desktop-agent
 version: 1.2.0
-description: 桌面 Agent，提供截图、浏览器自动化、文件系统、命令执行、代码执行、定时任务和本地 MCP 管理能力
+description: 桌面 Agent，提供截图、浏览器自动化、文件系统、命令执行、代码执行等本地能力
 tools:
   - name: screenshot
     description: 在端点上截取桌面屏幕，返回图片与结构化 observation 供视觉分析。返回文本里会附带 observation_id、scope、coordinate_space 等字段，多显示器时可用 screen（0-based）指定截取某块。不传 screen 则截取全部。macOS 支持 capture_window 选择窗口截图
@@ -146,7 +146,7 @@ tools:
       required: [command]
 
   - name: mcp_manage
-    description: 在端点上管理 MCP 服务（list/create/delete/start/stop）。start 后新工具自动注册可用
+    description: 在端点上管理扩展服务（list/create/delete/start/stop）。start 后新工具自动注册可用
     timeout: 300
     parameters:
       type: object
@@ -239,7 +239,7 @@ tools:
 
 桌面 Agent 运行在用户本地机器上，提供 Ailo 服务端无法直接执行的本地能力。
 
-调用所有工具时，须通过 `endpointId` 参数指定目标机器（如 `desktop-agent:screenshot(endpointId="macbook-zhangsan")`）。
+调用所有工具时，须通过 `endpointId` 参数指定目标机器（如 `desktop-agent_screenshot(endpointId="macbook-01")`）。
 
 ## 工具说明
 
@@ -265,9 +265,7 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 在端点上执行 shell 命令。调用后立即返回确认，命令在后台运行，完成后结果自动推送回来。无需轮询或手动查看状态。
 
 ### mcp_manage
-管理本地 MCP 服务。执行 `start` 后，端点会自动重连 Ailo 并注册新发现的工具。
-新 MCP 工具命名为 `endpointId:serverName:toolName`。
-重连期间约有 1-2 秒工具不可用窗口，属正常现象。
+管理端点上的扩展服务。执行 `start` 后，端点会自动重连并注册新发现的工具。
 
 ### browser_use
 控制 Chromium 浏览器。使用流程：
@@ -305,6 +303,7 @@ macOS 支持 `capture_window=true` 选择窗口截图。
 - `ActionResult` 不等于成功，必须看 `verdict`
 
 ## 约束
+- 工具名格式为 `蓝图名_工具名`（如 `desktop-agent_screenshot`），调用时必须使用完整的注册名，不要添加任何前缀
 - screenshot 需要操作系统权限（macOS 需屏幕录制权限）
 - exec 和 execute_code 都是异步执行，立即返回确认，完成后自动回报结果
 - browser_use 需要安装 Playwright 浏览器（首次使用前需执行 `npx playwright install chromium`）

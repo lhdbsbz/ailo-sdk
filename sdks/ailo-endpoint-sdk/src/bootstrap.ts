@@ -88,12 +88,50 @@ export interface EndpointConfig {
   onConnectFailure?: (err: Error, client: EndpointClient) => void | Promise<void>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isContentPartType(value: unknown): value is ContentPart["type"] {
+  return value === "text" || value === "image" || value === "audio" ||
+    value === "video" || value === "pdf" || value === "file";
+}
+
+function tmpExtensionForMedia(mime: string | undefined, type: Exclude<ContentPart["type"], "text">): string {
+  const normalized = (mime || "").toLowerCase();
+  if (normalized === "image/png") return ".png";
+  if (normalized === "image/jpeg") return ".jpg";
+  if (normalized === "image/webp") return ".webp";
+  if (normalized === "image/gif") return ".gif";
+  if (normalized === "audio/mpeg") return ".mp3";
+  if (normalized === "audio/wav" || normalized === "audio/x-wav") return ".wav";
+  if (normalized === "audio/ogg") return ".ogg";
+  if (normalized === "video/mp4") return ".mp4";
+  if (normalized === "application/pdf") return ".pdf";
+  if (type === "image") return ".png";
+  if (type === "audio") return ".mp3";
+  if (type === "video") return ".mp4";
+  if (type === "pdf") return ".pdf";
+  return ".bin";
+}
+
+function materializeInlineMedia(data: string, mime: string | undefined, type: Exclude<ContentPart["type"], "text">): string {
+  const dir = path.join(os.tmpdir(), "ailo_mcp_media");
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(
+    dir,
+    `${Date.now()}_${Math.random().toString(36).slice(2)}${tmpExtensionForMedia(mime, type)}`,
+  );
+  fs.writeFileSync(filePath, Buffer.from(data, "base64"));
+  return filePath;
+}
+
 export function runEndpoint(config: EndpointConfig): void {
   const { handler } = config;
 
-  const ailoWsUrl = config.ailoWsUrl ?? "";
-  const ailoApiKey = config.ailoApiKey ?? "";
-  const endpointId = config.endpointId ?? "";
+  const ailoWsUrl = config.ailoWsUrl ?? process.env.AILO_WS_URL ?? "";
+  const ailoApiKey = config.ailoApiKey ?? process.env.AILO_API_KEY ?? "";
+  const endpointId = config.endpointId ?? process.env.AILO_ENDPOINT_ID ?? "";
   const caps = config.caps ?? ["message", "tool_execute"];
 
   if (!ailoWsUrl || !ailoApiKey || !endpointId) {
@@ -228,7 +266,112 @@ export function runEndpoint(config: EndpointConfig): void {
     }
 
     function isContentParts(v: unknown): v is ContentPart[] {
-      return Array.isArray(v) && v.length > 0 && typeof v[0] === "object" && v[0] !== null && "type" in v[0];
+      return Array.isArray(v) && v.every((part) => typeof part === "object" && part !== null && "type" in part);
+    }
+
+    function stringifyStructured(value: unknown): string {
+      if (typeof value === "string") return value;
+      try {
+        const text = JSON.stringify(value);
+        if (text !== undefined) return text;
+      } catch {}
+      return String(value);
+    }
+
+    function isMcpCallResult(value: unknown): value is Record<string, unknown> {
+      return isRecord(value) && (
+        Array.isArray(value.content) ||
+        "structuredContent" in value ||
+        "isError" in value
+      );
+    }
+
+    function mcpItemToContentPart(item: unknown): ContentPart {
+      if (!isRecord(item)) {
+        return { type: "text", text: stringifyStructured(item) };
+      }
+
+      const rawType = item.type;
+      if (!isContentPartType(rawType)) {
+        return { type: "text", text: stringifyStructured(item) };
+      }
+      if (rawType === "text") {
+        return { type: "text", text: stringifyStructured(item.text ?? "") };
+      }
+
+      const mediaSource = isRecord(item.media) ? item.media : item;
+      const media: Record<string, unknown> = { type: rawType };
+      if (typeof mediaSource.fileRef === "string") media.fileRef = mediaSource.fileRef;
+      if (typeof mediaSource.path === "string") media.path = mediaSource.path;
+      if (typeof mediaSource.url === "string") media.url = mediaSource.url;
+      if (typeof mediaSource.sourcePath === "string") media.sourcePath = mediaSource.sourcePath;
+
+      const mime =
+        typeof mediaSource.mime === "string"
+          ? mediaSource.mime
+          : typeof mediaSource.mimeType === "string"
+            ? mediaSource.mimeType
+            : "";
+      if (mime) media.mime = mime;
+      if (typeof mediaSource.name === "string") media.name = mediaSource.name;
+
+      if (!media.path && !media.url && !media.fileRef && typeof mediaSource.data === "string") {
+        const localPath = materializeInlineMedia(mediaSource.data, mime || undefined, rawType);
+        media.path = localPath;
+        media.mime = mime || inferMime(localPath);
+        media.name = typeof media.name === "string" && media.name
+          ? media.name
+          : path.basename(localPath);
+      }
+
+      if (!media.path && !media.url && !media.fileRef) {
+        return { type: "text", text: stringifyStructured(item) };
+      }
+      if (!media.mime && typeof media.path === "string") media.mime = inferMime(media.path);
+      if (!media.name && typeof media.path === "string") media.name = path.basename(media.path);
+
+      return { type: rawType, media: media as ContentPart["media"] };
+    }
+
+    function adaptMcpCallResult(result: Record<string, unknown>): ContentPart[] {
+      const parts: ContentPart[] = [];
+      if (Array.isArray(result.content)) {
+        result.content.forEach((item) => parts.push(mcpItemToContentPart(item)));
+      }
+      if ("structuredContent" in result && result.structuredContent !== undefined) {
+        parts.push({ type: "text", text: stringifyStructured(result.structuredContent) });
+      }
+      return parts;
+    }
+
+    function extractMcpError(result: Record<string, unknown>): string {
+      if (Array.isArray(result.content)) {
+        const text = result.content
+          .map((item) => (isRecord(item) && typeof item.text === "string" ? item.text.trim() : ""))
+          .filter(Boolean)
+          .join("\n");
+        if (text) return text;
+      }
+      if ("structuredContent" in result && result.structuredContent !== undefined) {
+        return stringifyStructured(result.structuredContent);
+      }
+      return "MCP tool call failed";
+    }
+
+    async function normalizeToolResult(result: unknown): Promise<ContentPart[] | unknown> {
+      if (isContentParts(result)) {
+        await autoUploadMedia(result);
+        return result;
+      }
+      if (isMcpCallResult(result)) {
+        if (result.isError === true) {
+          throw new Error(extractMcpError(result));
+        }
+        const adapted = adaptMcpCallResult(result);
+        await autoUploadMedia(adapted);
+        return adapted;
+      }
+      return result;
     }
 
     // ── tool dispatch with middleware ──
@@ -241,10 +384,12 @@ export function runEndpoint(config: EndpointConfig): void {
         const fn = handlers[req.name];
         if (fn) {
           const result = await fn(req.args);
-          if (isContentParts(result)) await autoUploadMedia(result);
-          return result;
+          return normalizeToolResult(result);
         }
-        if (onUnknown) return onUnknown(req.name, req.args);
+        if (onUnknown) {
+          const result = await onUnknown(req.name, req.args);
+          return normalizeToolResult(result);
+        }
         throw new Error(`unknown tool: ${req.name}`);
       });
     }

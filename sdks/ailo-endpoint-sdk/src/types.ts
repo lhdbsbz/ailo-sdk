@@ -91,9 +91,8 @@ export type WorldUpdatePayload = {
 export type ToolResponsePayload = {
   id: string;      // correlates to incoming ToolRequestPayload.id
   success: boolean;
-  result?: unknown;
   error?: string;
-  /** Unified content format (same as AcceptMessage.content). Preferred over result when present. */
+  /** Unified response format. Structured payloads should be encoded as JSON text in a single text part. */
   content?: ContentPart[];
 };
 
@@ -216,7 +215,7 @@ export type EndpointUpdateParams = {
 
 // ─── Tool handler ─────────────────────────────────────────────────────────────
 
-/** Tool handler return type: ContentPart[] for multimodal results, or any other value for legacy text results. */
+/** Tool handler return type: ContentPart[] for direct multimodal results; any other value is serialized into a text ContentPart. */
 export type ToolHandler = (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>;
 
 // ─── Storage interface ────────────────────────────────────────────────────────

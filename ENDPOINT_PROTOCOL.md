@@ -314,17 +314,16 @@ Report sensor/perception data for scene understanding.
 
 Return tool execution results, correlated with the `tool_request` via its `id`.
 
-Two response formats are supported (`content` is preferred; falls back to `result`):
+`tool_response` uses a single unified format:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Correlates to the `tool_request.id` |
 | `success` | boolean | Whether execution succeeded |
-| `result` | any | Legacy format: arbitrary JSON result (backward-compatible) |
 | `error` | string | Error message (on failure) |
-| `content` | ContentPart[] | **Preferred format**: same structure as `endpoint.accept` content — supports text, image, audio, video, and mixed content. The server uses this field when present, falling back to `result` otherwise |
+| `content` | ContentPart[] | Same structure as `endpoint.accept` content — supports text, image, audio, video, and mixed content. Structured payloads should be encoded as JSON text in a single `text` part. |
 
-**Legacy format example** (plain result):
+**Structured JSON example** (`dir_list` style payload in a single text part):
 
 ```json
 {
@@ -334,12 +333,14 @@ Two response formats are supported (`content` is preferred; falls back to `resul
   "params": {
     "id": "req_001",
     "success": true,
-    "result": { "duration_ms": 1240 }
+    "content": [
+      { "type": "text", "text": "{\"entries\":[{\"name\":\"notes.txt\",\"type\":\"file\",\"size\":128}]}" }
+    ]
   }
 }
 ```
 
-**ContentPart format example** (screenshot tool returning an image):
+**Multimodal example** (screenshot tool returning an image):
 
 ```json
 {

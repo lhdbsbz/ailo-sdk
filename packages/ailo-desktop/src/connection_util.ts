@@ -16,8 +16,8 @@ export function loadConnectionConfig(configPath: string): AiloConnectionConfig {
   const raw = readConfig(configPath);
   const ailo = (raw as Record<string, unknown>).ailo as Record<string, unknown> | undefined;
   return {
-    url: (ailo?.wsUrl as string) ?? "",
-    apiKey: (ailo?.apiKey as string) ?? "",
-    endpointId: (ailo?.endpointId as string) ?? "",
+    url: process.env.AILO_WS_URL || (ailo?.wsUrl as string) || "",
+    apiKey: process.env.AILO_API_KEY || (ailo?.apiKey as string) || "",
+    endpointId: process.env.AILO_ENDPOINT_ID || (ailo?.endpointId as string) || "",
   };
 }
