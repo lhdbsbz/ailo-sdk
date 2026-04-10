@@ -1,4 +1,4 @@
-import type { EndpointContext } from "@lmcl/ailo-endpoint-sdk";
+import type { EndpointContext } from "@greatlhd/ailo-endpoint-sdk";
 
 export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

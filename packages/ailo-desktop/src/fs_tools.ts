@@ -1,245 +1,272 @@
 import * as fs from "fs";
 import * as path from "path";
-import { glob } from "glob";
-
-const MAX_SEARCH_RESULTS = 500;
-const MAX_SEARCH_DEPTH = 10;
-const MAX_FIND_RESULTS = 200;
-const IGNORED_DIRS = ["node_modules", ".git"];
-/** 单次 read_file 最大字节数，超出则分块读取并截断提示 */
-const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB
+import type { ContentPart } from "@greatlhd/ailo-endpoint-sdk";
+import { validateArgs } from "./param_validator.js";
+import { requireAbsPath } from "./path_utils.js";
+import { markFileRead, isFileStale, clearFileState } from "./tool_context.js";
+import { applyPatchFromArgs } from "./apply_patch.js";
 
 type Args = Record<string, unknown>;
 
-function requireAbsPath(p: string, param: string): string {
-  if (!p) throw new Error(`${param} 不能为空`);
-  if (!path.isAbsolute(p)) {
-    throw new Error(`${param} 必须是绝对路径，收到相对路径: "${p}"`);
-  }
-  return p;
-}
-
-export async function fsTool(name: string, args: Args): Promise<string> {
+export async function fsTool(name: string, args: Args): Promise<string | ContentPart[]> {
   switch (name) {
-    case "read_file":
+    case "read":
       return readFile(args);
-    case "write_file":
+    case "write":
       return writeFile(args);
-    case "edit_file":
+    case "edit":
       return editFile(args);
-    case "list_directory":
-      return listDirectory(args);
-    case "find_files":
-      return findFiles(args);
-    case "search_content":
-      return searchContent(args);
-    case "delete_file":
-      return deleteFile(args);
-    case "move_file":
-      return moveFile(args);
-    case "copy_file":
-      return copyFile(args);
-    case "append_file":
-      return appendFile(args);
+    case "apply_patch":
+      return applyPatchFromArgs(args);
     default:
       throw new Error(`unknown fs tool: ${name}`);
   }
 }
 
-function readFile(args: Args): string {
-  const filePath = requireAbsPath(args.path as string, "path");
+interface ReadFileArgs {
+  path: string;
+  offset?: number;
+  limit?: number;
+}
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+function inferMime(ext: string): string {
+  const map: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+async function readFile(args: Args): Promise<string | ContentPart[]> {
+  const validated = validateArgs<ReadFileArgs>(args, {
+    path: { type: "string", required: true },
+    offset: { type: "number", default: 1, min: 1 },
+    limit: { type: "number", default: 1000, min: 1 },
+  });
+  const filePath = requireAbsPath(validated.path, "path");
   if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
 
   const stat = fs.statSync(filePath);
   if (!stat.isFile()) throw new Error(`路径不是文件: ${filePath}`);
-  const offset = Math.max(0, ((args.offset as number) ?? 1) - 1);
-  const limit = (args.limit as number) ?? undefined;
 
-  let content: string;
-  if (stat.size > MAX_READ_BYTES) {
-    const fd = fs.openSync(filePath, "r");
-    const buf = Buffer.alloc(MAX_READ_BYTES);
-    fs.readSync(fd, buf, 0, buf.length, 0);
-    fs.closeSync(fd);
-    content = buf.toString("utf-8");
-    content += `\n...[文件已截断，共 ${stat.size} 字节，仅显示前 ${MAX_READ_BYTES} 字节。可用 offset/limit 分页读取]`;
-  } else {
-    content = fs.readFileSync(filePath, "utf-8");
+  const ext = path.extname(filePath).toLowerCase().slice(1);
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    const mime = inferMime(ext);
+    return [
+      {
+        type: "image",
+        media: {
+          type: "image",
+          path: filePath,
+          mime,
+          name: path.basename(filePath),
+        },
+      },
+    ];
   }
 
-  const lines = content.split("\n");
+  const offset = validated.offset! - 1;
+  const limit = validated.limit!;
+
+  const rawBuf = fs.readFileSync(filePath);
+  const detected = detectEncoding(rawBuf);
+  const textContent = detected.bom
+    ? rawBuf.slice(detected.bom.length).toString("utf8")
+    : rawBuf.toString("utf8");
+  const lines = textContent.split("\n");
+  const totalLines = lines.length;
   const slice = limit !== undefined ? lines.slice(offset, offset + limit) : lines.slice(offset);
-  return slice.map((line, i) => `${String(offset + i + 1).padStart(6)}|${line}`).join("\n");
+  const startLineNum = offset + 1;
+  const endLineNum = startLineNum + slice.length - 1;
+  const isPartial = slice.length < totalLines;
+
+  markFileRead(filePath, textContent, stat.mtime, validated.offset!, validated.limit!);
+
+  const encodingInfo = detected.bom ? ` | Encoding: ${detected.encoding}+BOM` : "";
+  const header = isPartial
+    ? `[File: ${filePath} | Size: ${formatSize(stat.size)} | Lines: ${totalLines}${encodingInfo} | Showing: ${startLineNum}-${endLineNum} of ${totalLines}]`
+    : `[File: ${filePath} | Size: ${formatSize(stat.size)} | Lines: ${totalLines}${encodingInfo}]`;
+
+  const body = slice.map((line, i) => `${String(startLineNum + i).padStart(6)}|${line}`).join("\n");
+  const content = header + "\n" + body;
+
+  return JSON.stringify({
+    ok: true,
+    content,
+    mtime: stat.mtimeMs,
+  });
+}
+
+interface WriteFileArgs {
+  path: string;
+  content: string;
+  encoding?: string;
+}
+
+const BOM_MAP: Record<string, Buffer> = {
+  utf8: Buffer.from([0xef, 0xbb, 0xbf]),
+  utf16le: Buffer.from([0xff, 0xfe]),
+};
+
+function detectEncoding(buf: Buffer): { encoding: string; bom: Buffer | null } {
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return { encoding: "utf-8", bom: buf.slice(0, 3) };
+  }
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    return { encoding: "utf-16le", bom: buf.slice(0, 2) };
+  }
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    return { encoding: "utf-16be", bom: buf.slice(0, 2) };
+  }
+  return { encoding: "utf-8", bom: null };
 }
 
 function writeFile(args: Args): string {
-  const filePath = requireAbsPath(args.path as string, "path");
-  const content = args.content as string;
+  const validated = validateArgs<WriteFileArgs>(args, {
+    path: { type: "string", required: true },
+    content: { type: "string", required: true },
+    encoding: { type: "string", default: "utf-8" },
+  });
+  const filePath = requireAbsPath(validated.path, "path");
+  const content = validated.content;
+  const encoding = validated.encoding || "utf-8";
+
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, "utf-8");
-  return `已写入 ${filePath}（${content.length} 字符）`;
-}
 
-function editFile(args: Args): string {
-  const filePath = requireAbsPath(args.path as string, "path");
-  const oldStr = args.old_string as string;
-  const newStr = args.new_string as string;
-  const replaceAll = (args.replace_all as boolean) ?? false;
-
-  if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
-  let content = fs.readFileSync(filePath, "utf-8");
-
-  if (!content.includes(oldStr)) {
-    throw new Error("old_string 在文件中未找到");
-  }
-
-  if (replaceAll) {
-    content = content.split(oldStr).join(newStr);
-  } else {
-    const idx = content.indexOf(oldStr);
-    content = content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
-  }
-
-  fs.writeFileSync(filePath, content, "utf-8");
-  return `已编辑 ${filePath}`;
-}
-
-function listDirectory(args: Args): string {
-  const dirPath = requireAbsPath(args.path as string, "path");
-  if (!fs.existsSync(dirPath)) throw new Error(`目录不存在: ${dirPath}`);
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  const lines = entries.map((e) => {
-    const suffix = e.isDirectory() ? "/" : "";
-    try {
-      const stat = fs.statSync(path.join(dirPath, e.name));
-      const size = e.isDirectory() ? "-" : formatSize(stat.size);
-      return `${e.name}${suffix}  (${size})`;
-    } catch {
-      return `${e.name}${suffix}`;
+  let oldBytes = 0;
+  let bomPreserved = false;
+  const created = !fs.existsSync(filePath);
+  if (!created) {
+    const oldBuf = fs.readFileSync(filePath);
+    oldBytes = oldBuf.length;
+    const detected = detectEncoding(oldBuf);
+    const contentBuf = Buffer.from(content, "utf-8");
+    const contentHasBom = Object.values(BOM_MAP).some(
+      (bom) => contentBuf.length >= bom.length && contentBuf.slice(0, bom.length).equals(bom),
+    );
+    if (!contentHasBom && detected.bom) {
+      const finalBuf = Buffer.concat([detected.bom, contentBuf]);
+      fs.writeFileSync(filePath, finalBuf);
+      bomPreserved = true;
+    } else {
+      fs.writeFileSync(filePath, content, encoding as BufferEncoding);
     }
-  });
-  return lines.join("\n") || "(空目录)";
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-async function findFiles(args: Args): Promise<string> {
-  const pattern = args.pattern as string;
-  const directory = requireAbsPath((args.directory as string) || process.cwd(), "directory");
-  const maxResults = (args.max_results as number) || MAX_FIND_RESULTS;
-
-  const matches = await glob(pattern, {
-    cwd: directory,
-    absolute: true,
-    nodir: false,
-    ignore: IGNORED_DIRS.map(d => `**/${d}/**`),
-  });
-
-  const limited = matches.slice(0, maxResults);
-  if (limited.length === 0) return "未找到匹配文件";
-  let result = limited.join("\n");
-  if (matches.length > maxResults) {
-    result += `\n... 还有 ${matches.length - maxResults} 个结果`;
+  } else {
+    fs.writeFileSync(filePath, content, encoding as BufferEncoding);
   }
-  return result;
+  clearFileState(filePath);
+  return JSON.stringify({
+    ok: true,
+    path: filePath,
+    old_bytes: oldBytes,
+    new_bytes: Buffer.byteLength(content, "utf-8"),
+    encoding,
+    bom_preserved: bomPreserved,
+    created,
+  });
 }
 
-function searchContent(args: Args): string {
-  const query = args.query as string;
-  const directory = requireAbsPath((args.directory as string) || process.cwd(), "directory");
-  const useRegex = (args.regex as boolean) ?? false;
-  const ignoreCase = (args.ignore_case as boolean) ?? false;
-  const contextLines = (args.context_lines as number) ?? 0;
-
-  let pattern: RegExp;
-  try {
-    pattern = useRegex
-      ? new RegExp(query, ignoreCase ? "gi" : "g")
-      : new RegExp(escapeRegex(query), ignoreCase ? "gi" : "g");
-  } catch {
-    throw new Error(`无效的正则表达式: "${query}"`);
-  }
-
-  const results: string[] = [];
-  searchDir(directory, pattern, contextLines, results, 0, MAX_SEARCH_RESULTS);
-  return results.join("\n") || "未找到匹配内容";
+interface EditFileArgs {
+  path: string;
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
 }
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function searchDir(dir: string, pattern: RegExp, ctx: number, results: string[], depth: number, limit: number): void {
-  if (depth > MAX_SEARCH_DEPTH || results.length >= limit) return;
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    if (results.length >= limit) return;
-    const full = path.join(dir, e.name);
-    if (IGNORED_DIRS.includes(e.name)) continue;
-    if (e.isDirectory()) {
-      searchDir(full, pattern, ctx, results, depth + 1, limit);
-    } else if (e.isFile()) {
-      try {
-        const content = fs.readFileSync(full, "utf-8");
-        const lines = content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          if (pattern.test(lines[i])) {
-            const start = Math.max(0, i - ctx);
-            const end = Math.min(lines.length, i + ctx + 1);
-            const block = lines.slice(start, end).map((l, j) => {
-              const lineNum = start + j + 1;
-              const marker = (start + j === i) ? ":" : "-";
-              return `${String(lineNum).padStart(4)}${marker} ${l}`;
-            });
-            results.push(`${full}:\n${block.join("\n")}`);
-            if (results.length >= limit) return;
-          }
-        }
-      } catch { /* skip binary / unreadable files */ }
-    }
+function editFile(args: Args): string {
+  const validated = validateArgs<EditFileArgs>(args, {
+    path: { type: "string", required: true },
+    old_string: { type: "string", required: true },
+    new_string: { type: "string", required: true },
+    replace_all: { type: "boolean", default: false },
+  });
+  const filePath = requireAbsPath(validated.path, "path");
+  const oldStr = validated.old_string;
+  const newStr = validated.new_string;
+  const replaceAll = validated.replace_all ?? false;
+
+  if (!fs.existsSync(filePath)) {
+    return JSON.stringify({ ok: false, code: "file_not_found", error: `文件不存在: ${filePath}` });
   }
-}
 
-function deleteFile(args: Args): string {
-  const filePath = requireAbsPath(args.path as string, "path");
-  const recursive = (args.recursive as boolean) ?? false;
-  if (!fs.existsSync(filePath)) throw new Error(`路径不存在: ${filePath}`);
-  fs.rmSync(filePath, { recursive, force: true });
-  return `已删除 ${filePath}`;
-}
+  if (isFileStale(filePath)) {
+    return JSON.stringify({ ok: false, code: "file_stale", error: "文件未 read 或已被外部修改，请先 read 后再 edit" });
+  }
 
-function moveFile(args: Args): string {
-  const src = requireAbsPath(args.source as string, "source");
-  const dst = requireAbsPath(args.destination as string, "destination");
-  if (!fs.existsSync(src)) throw new Error(`源路径不存在: ${src}`);
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  fs.renameSync(src, dst);
-  return `已移动 ${src} → ${dst}`;
-}
+  const content = fs.readFileSync(filePath, "utf-8");
 
-function copyFile(args: Args): string {
-  const src = requireAbsPath(args.source as string, "source");
-  const dst = requireAbsPath(args.destination as string, "destination");
-  if (!fs.existsSync(src)) throw new Error(`源路径不存在: ${src}`);
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  const stat = fs.statSync(src);
-  if (stat.isDirectory()) {
-    fs.cpSync(src, dst, { recursive: true });
+  if (!content.includes(oldStr)) {
+    return JSON.stringify({ ok: false, code: "parse_failed", error: "old_string 在文件中未找到" });
+  }
+
+  const escaped = escapeRegex(oldStr);
+  const totalMatches = (content.match(new RegExp(escaped, "g")) || []).length;
+
+  const originalContent = content;
+  const oldLines = originalContent.split("\n");
+  let newContent: string;
+  let occurrences = 0;
+
+  if (replaceAll) {
+    occurrences = totalMatches;
+    newContent = content.split(oldStr).join(newStr);
   } else {
-    fs.copyFileSync(src, dst);
+    const idx = content.indexOf(oldStr);
+    newContent = content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
+    occurrences = 1;
   }
-  return `已复制 ${src} → ${dst}`;
+
+  const newLines = newContent.split("\n");
+  const additions = newLines.length - oldLines.length;
+  const oldStrIdx = originalContent.indexOf(oldStr);
+  const oldStrLineCount = oldStr.split("\n").length;
+  const oldLineIdx = originalContent.slice(0, oldStrIdx).split("\n").length - 1;
+  const lineStart = Math.max(0, oldLineIdx - 2);
+  const lineEnd = Math.min(oldLines.length, oldLineIdx + oldStrLineCount + 2);
+
+  fs.writeFileSync(filePath, newContent, "utf-8");
+
+  const stat = fs.statSync(filePath);
+  markFileRead(filePath, newContent, stat.mtime, 1, newLines.length);
+
+  const result: Record<string, unknown> = {
+    ok: true,
+    path: filePath,
+    occurrences,
+    replace_all: replaceAll,
+    hunk: {
+      old_start: lineStart + 1,
+      old_lines: lineEnd - lineStart,
+      new_start: lineStart + 1,
+      new_lines: lineEnd - lineStart + additions,
+      lines: [
+        ...oldLines.slice(lineStart, oldLineIdx).map((l) => ` ${l}`),
+        ...oldStr.split("\n").map((l) => `-${l}`),
+        ...newStr.split("\n").map((l) => `+${l}`),
+        ...oldLines.slice(oldLineIdx + oldStrLineCount, lineEnd).map((l) => ` ${l}`),
+      ],
+    },
+  };
+
+  if (!replaceAll && totalMatches > 1) {
+    result.warning = `old_string 在文件中出现 ${totalMatches} 次，仅替换第一次；如需全替换用 replace_all=true`;
+  }
+
+  return JSON.stringify(result);
 }
 
-function appendFile(args: Args): string {
-  const filePath = requireAbsPath(args.path as string, "path");
-  const content = args.content as string;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.appendFileSync(filePath, content, "utf-8");
-  return `已追加到 ${filePath}（${content.length} 字符）`;
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }

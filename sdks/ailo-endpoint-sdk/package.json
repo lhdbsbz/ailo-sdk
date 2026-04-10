@@ -1,6 +1,6 @@
 {
-  "name": "@lmcl/ailo-endpoint-sdk",
-  "version": "1.0.0",
+  "name": "@greatlhd/ailo-endpoint-sdk",
+  "version": "1.0.2",
   "description": "Ailo Endpoint SDK — unified SDK for connecting any endpoint (robot, feishu, camera, IoT, etc.) to Ailo",
   "type": "module",
   "main": "dist/index.js",
@@ -12,17 +12,23 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepublishOnly": "npm run build"
   },
   "keywords": ["ailo", "endpoint", "sdk", "robot", "iot"],
   "license": "MIT",
   "dependencies": {
+    "js-yaml": "^4.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
   },
   "engines": {
     "node": ">=18"

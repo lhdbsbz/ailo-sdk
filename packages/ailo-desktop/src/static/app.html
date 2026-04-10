@@ -18,7 +18,7 @@
     </div>
     <div class="brand-info">
       <div class="brand-name">Ailo Desktop</div>
-      <div class="brand-status">
+      <div class="connection-status" id="connectionStatus">
         <span class="status-dot off" id="globalDot"></span>
         <span id="globalStatus">未连接</span>
       </div>
@@ -26,7 +26,6 @@
   </div>
 
   <nav class="sidebar-nav">
-    <div class="nav-section-label">主界面</div>
     <div class="nav-item active" data-panel="chat" onclick="nav('chat')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>网页聊天</span>
@@ -35,44 +34,16 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span>状态</span>
     </div>
-
-    <div class="nav-section-label">能力</div>
     <div class="nav-item" data-panel="tools" onclick="nav('tools')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
       <span>工具</span>
+      <span class="nav-badge" id="toolsCount" style="display:none">0</span>
     </div>
     <div class="nav-item" data-panel="mcp" onclick="nav('mcp')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
       <span>MCP</span>
+      <span class="nav-badge" id="mcpCount" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-panel="skills" onclick="nav('skills')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-      <span>Skills</span>
-    </div>
-
-    <div class="nav-section-label">通道配置</div>
-    <div class="nav-item" data-panel="email" onclick="nav('email')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-      <span>邮件</span>
-      <span class="nav-badge off" id="emailNavBadge" style="display:none"></span>
-    </div>
-    <div class="nav-item" data-panel="feishu" onclick="nav('feishu')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>飞书</span>
-      <span class="nav-badge off" id="feishuNavBadge" style="display:none"></span>
-    </div>
-    <div class="nav-item" data-panel="dingtalk" onclick="nav('dingtalk')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-      <span>钉钉</span>
-      <span class="nav-badge off" id="dingtalkNavBadge" style="display:none"></span>
-    </div>
-    <div class="nav-item" data-panel="qq" onclick="nav('qq')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"/></svg>
-      <span>QQ</span>
-      <span class="nav-badge off" id="qqNavBadge" style="display:none"></span>
-    </div>
-
-    <div class="nav-section-label">系统</div>
     <div class="nav-item" data-panel="env" onclick="nav('env')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       <span>运行环境</span>
@@ -91,46 +62,53 @@
 
     <!-- 状态 -->
     <div class="panel" id="panel-status">
-      <div class="card" id="statusCard">
-        <div class="connection-hero">
-          <div class="connection-icon" id="connectionIcon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <div class="card">
+        <div class="status-header">
+          <div class="status-icon" id="statusIcon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
               <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
             </svg>
           </div>
-          <div>
-            <div class="connection-label" id="connectionLabel">未连接</div>
-            <div class="connection-sublabel" id="connectionSublabel">尚未连接至 Ailo 服务</div>
+          <div class="status-info">
+            <div class="status-title" id="statusTitle">未连接</div>
+            <div class="status-subtitle" id="statusSubtitle">尚未连接至 Ailo 服务</div>
           </div>
-          <div style="margin-left:auto" id="connectionBadgeWrap"></div>
         </div>
-        <div class="info-grid" id="statusInfoGrid" style="display:none">
-          <div class="info-item">
-            <div class="info-item-label">端点 ID</div>
-            <div class="info-item-value" id="statusEndpointId">-</div>
+        <div class="status-stats" id="statusStats">
+          <div class="stat-item">
+            <div class="stat-label">端点 ID</div>
+            <div class="stat-value" id="statEndpointId">-</div>
           </div>
-          <div class="info-item">
-            <div class="info-item-label">连接状态</div>
-            <div class="info-item-value" id="statusConnected">-</div>
+          <div class="stat-item">
+            <div class="stat-label">已上报工具</div>
+            <div class="stat-value" id="statToolCount">-</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">MCP 服务</div>
+            <div class="stat-value" id="statMcpCount">-</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">运行时间</div>
+            <div class="stat-value" id="statUptime">-</div>
           </div>
         </div>
       </div>
 
-      <!-- 连接配置（仅 showConnectionForm=true 时显示） -->
+      <!-- 连接配置 -->
       <div class="card" id="connectionFormCard" style="display:none">
         <div class="card-header">
-          <div>
-            <div class="card-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-              Ailo 连接配置
-            </div>
-            <div class="card-desc">保存后将使用新配置自动重连，无需重启进程</div>
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+            Ailo 连接配置
           </div>
         </div>
-        <div class="form-group"><label>AILO_WS_URL</label><input id="connWsUrl" placeholder="ws://127.0.0.1:19800/ws"></div>
-        <div class="form-group"><label>AILO_API_KEY</label><input id="connApiKey" type="text" placeholder="ailo_ep_xxx" autocomplete="off"></div>
-        <div class="form-group"><label>AILO_ENDPOINT_ID</label><input id="connEndpointId" placeholder="desktop-01"></div>
+        <div class="card-desc">保存后将使用新配置自动重连，无需重启进程</div>
+        <div class="form-row">
+          <div class="form-group"><label>AILO_WS_URL</label><input id="connWsUrl" placeholder="ws://127.0.0.1:19800/ws"></div>
+          <div class="form-group"><label>AILO_API_KEY</label><input id="connApiKey" type="text" placeholder="ailo_ep_xxx" autocomplete="off"></div>
+          <div class="form-group"><label>端点 ID</label><input id="connEndpointId" placeholder="desktop-01"></div>
+        </div>
         <div class="btn-group">
           <button class="btn btn-primary" id="saveConnBtn" onclick="saveConnection()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -143,40 +121,31 @@
     <!-- 工具 -->
     <div class="panel" id="panel-tools">
       <div class="sub-tabs">
-        <button class="sub-tab active" data-sub="reported" onclick="toolsSub('reported')">已上报工具</button>
-        <button class="sub-tab" data-sub="blueprints" onclick="toolsSub('blueprints')">蓝图</button>
+        <button class="sub-tab active" data-sub="tools" onclick="toolsSub('tools')">工具<span class="tab-count" id="toolsTabCount">0</span></button>
+        <button class="sub-tab" data-sub="skills" onclick="toolsSub('skills')">技能<span class="tab-count" id="skillsTabCount">0</span></button>
       </div>
-      <div class="sub-panel active" id="sub-reported">
+      <div class="sub-panel active" id="sub-tools">
         <div class="card">
           <div class="card-header">
-            <div class="card-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-              已上报工具
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadReportedTools()">
+            <div class="card-title">已上报工具</div>
+            <button class="btn btn-secondary btn-sm" onclick="refreshTools()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
               刷新
             </button>
           </div>
-          <div class="card-desc" style="margin-bottom:12px">桌面端向 Ailo 注册的能力（蓝图 + MCP），可直接在对话中调用</div>
           <div id="reportedToolsList"><div class="loading-text">加载中...</div></div>
         </div>
       </div>
-      <div class="sub-panel" id="sub-blueprints">
+      <div class="sub-panel" id="sub-skills">
         <div class="card">
           <div class="card-header">
-            <div class="card-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              蓝图
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadAllBlueprints()">
+            <div class="card-title">已上报技能</div>
+            <button class="btn btn-secondary btn-sm" onclick="loadReportedSkills()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
               刷新
             </button>
           </div>
-          <div class="card-desc" style="margin-bottom:14px">当前激活蓝图列表（仅已配置的通道才会出现）</div>
-          <div class="sub-tabs blueprint-tabs" id="blueprintTabRow"></div>
-          <div id="blueprintPanels"><div class="loading-text">加载中...</div></div>
+          <div id="reportedSkillsList"><div class="loading-text">加载中...</div></div>
         </div>
       </div>
     </div>
@@ -185,11 +154,8 @@
     <div class="panel" id="panel-mcp">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-            MCP 服务
-          </div>
-          <div class="btn-group" style="margin:0">
+          <div class="card-title">MCP 服务</div>
+          <div class="btn-group">
             <button class="btn btn-primary btn-sm" onclick="showMCPCreateModal()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               新增
@@ -200,134 +166,8 @@
             </button>
           </div>
         </div>
-        <div class="card-desc" style="margin-bottom:12px">配置保存在 <code>~/.agents/mcp_config.json</code>，新增后需点击「启动」才会上报工具</div>
+        <div class="card-desc">新增或启动 MCP 服务后，工具会自动上报到 Ailo</div>
         <div id="mcpList"><div class="loading-text">加载中...</div></div>
-      </div>
-    </div>
-
-    <!-- Skills -->
-    <div class="panel" id="panel-skills">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-            Skills
-          </div>
-          <div class="btn-group" style="margin:0">
-            <button class="btn btn-primary btn-sm" id="skillsReconnectBtn" onclick="doSkillsReconnect()">重连刷新</button>
-            <button class="btn btn-secondary btn-sm" onclick="showInstallModal()">从市场安装</button>
-            <button class="btn btn-secondary btn-sm" onclick="showCreateModal()">创建</button>
-          </div>
-        </div>
-        <div class="card-desc" style="margin-bottom:12px">启用/禁用后点击「重连刷新」即可同步到服务端，无需重启桌面端</div>
-        <div id="skillsList"><div class="loading-text">加载中...</div></div>
-      </div>
-    </div>
-
-    <!-- 邮件 -->
-    <div class="panel" id="panel-email">
-      <div class="card">
-        <div class="channel-header">
-          <div class="channel-icon" style="background:rgba(59,130,246,.15)">📧</div>
-          <div>
-            <div class="channel-title">邮件通道</div>
-            <div class="channel-subtitle">通过 IMAP/SMTP 接收并发送邮件，推送至 Ailo</div>
-          </div>
-          <div style="margin-left:auto" id="emailStatusBadge"></div>
-        </div>
-        <div style="display:flex;gap:24px;flex-wrap:wrap">
-          <div style="flex:1;min-width:240px">
-            <div class="card-title" style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">IMAP（接收）</div>
-            <div class="form-group"><label>主机</label><input id="emailImapHost" placeholder="imap.example.com"></div>
-            <div class="form-row">
-              <div class="form-group"><label>用户名</label><input id="emailImapUser" placeholder="user@example.com"></div>
-              <div class="form-group" style="max-width:100px"><label>端口</label><input id="emailImapPort" type="number" placeholder="993"></div>
-            </div>
-            <div class="form-group"><label>密码 / 授权码</label><input id="emailImapPassword" type="text" autocomplete="off" placeholder="密码或授权码"></div>
-          </div>
-          <div style="flex:1;min-width:240px">
-            <div class="card-title" style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">SMTP（发送）<span class="optional" style="font-weight:400;color:var(--text-muted);font-size:12px;margin-left:4px">可选</span></div>
-            <div class="form-group"><label>主机 <span class="optional">不填则从 IMAP 推断</span></label><input id="emailSmtpHost" placeholder="smtp.example.com"></div>
-            <div class="form-row">
-              <div class="form-group"><label>用户名 <span class="optional">不填则同 IMAP</span></label><input id="emailSmtpUser" placeholder=""></div>
-              <div class="form-group" style="max-width:100px"><label>端口</label><input id="emailSmtpPort" type="number" placeholder="465"></div>
-            </div>
-            <div class="form-group"><label>密码 <span class="optional">不填则同 IMAP</span></label><input id="emailSmtpPassword" type="text" autocomplete="off" placeholder=""></div>
-          </div>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="saveEmailBtn" onclick="saveEmailConfig()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            保存
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 飞书 -->
-    <div class="panel" id="panel-feishu">
-      <div class="card">
-        <div class="channel-header">
-          <div class="channel-icon" style="background:rgba(6,182,212,.15)">🐦</div>
-          <div>
-            <div class="channel-title">飞书通道</div>
-            <div class="channel-subtitle">通过飞书 WebSocket 接收消息并代为回复</div>
-          </div>
-          <div style="margin-left:auto" id="feishuStatusBadge"></div>
-        </div>
-        <div class="form-group"><label>App ID</label><input id="feishuAppId" placeholder="cli_xxx"></div>
-        <div class="form-group"><label>App Secret</label><input id="feishuAppSecret" type="text" autocomplete="off" placeholder="应用密钥"></div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="saveFeishuBtn" onclick="saveFeishuConfig()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            保存
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 钉钉 -->
-    <div class="panel" id="panel-dingtalk">
-      <div class="card">
-        <div class="channel-header">
-          <div class="channel-icon" style="background:rgba(16,185,129,.15)">🔔</div>
-          <div>
-            <div class="channel-title">钉钉通道</div>
-            <div class="channel-subtitle">通过钉钉 Stream 接收消息并代为回复</div>
-          </div>
-          <div style="margin-left:auto" id="dingtalkStatusBadge"></div>
-        </div>
-        <div class="form-group"><label>Client ID</label><input id="dingtalkClientId" placeholder="dingxxxxxxxx"></div>
-        <div class="form-group"><label>Client Secret</label><input id="dingtalkClientSecret" type="text" autocomplete="off" placeholder="应用密钥"></div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="saveDingtalkBtn" onclick="saveDingtalkConfig()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            保存
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- QQ -->
-    <div class="panel" id="panel-qq">
-      <div class="card">
-        <div class="channel-header">
-          <div class="channel-icon" style="background:rgba(168,85,247,.15)">🐧</div>
-          <div>
-            <div class="channel-title">QQ 通道</div>
-            <div class="channel-subtitle">通过 QQ Gateway WebSocket 接收消息并代为回复</div>
-          </div>
-          <div style="margin-left:auto" id="qqStatusBadge"></div>
-        </div>
-        <div class="form-group"><label>App ID</label><input id="qqAppId" placeholder="1234567890"></div>
-        <div class="form-group"><label>App Secret</label><input id="qqAppSecret" type="text" autocomplete="off" placeholder="应用密钥"></div>
-        <div class="form-group"><label>API Base <span class="optional">可选，默认 https://api.sgroup.qq.com</span></label><input id="qqApiBase" placeholder="https://api.sgroup.qq.com"></div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="saveQQBtn" onclick="saveQQConfig()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            保存
-          </button>
-        </div>
       </div>
     </div>
 
@@ -335,16 +175,12 @@
     <div class="panel" id="panel-env">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            运行环境检测
-          </div>
+          <div class="card-title">运行环境</div>
           <button class="btn btn-secondary btn-sm" onclick="loadEnvCheck()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
             刷新
           </button>
         </div>
-        <div class="card-desc" style="margin-bottom:16px">以下为桌面端与 Skills 所需的运行环境。未安装时请按提示操作；仅「Playwright Chromium」支持一键安装。</div>
         <div id="envCheckList"><div class="loading-text">加载中...</div></div>
         <div id="envInstallRow" style="margin-top:14px;display:none">
           <button class="btn btn-primary btn-sm" id="envInstallBtn" onclick="doEnvInstall()">
@@ -363,67 +199,26 @@
 
 <!-- ─── Modals ───────────────────────────────────────────────── -->
 
-<!-- Install Skill Modal -->
-<div class="modal-overlay" id="installModal">
-  <div class="modal">
-    <div class="modal-title">从市场安装 Skill</div>
-    <div class="modal-sub">支持以下技能市场或 GitHub raw 链接：</div>
-    <ul class="modal-market-list">
-      <li><a href="https://skills.sh" target="_blank">skills.sh</a> — <span class="modal-market-fmt">https://skills.sh/{owner}/{repo}/{skill}</span></li>
-      <li><a href="https://clawhub.ai" target="_blank">clawhub.ai</a> — <span class="modal-market-fmt">https://clawhub.ai/{slug}</span></li>
-      <li><a href="https://skillsmp.com" target="_blank">skillsmp.com</a> — <span class="modal-market-fmt">https://skillsmp.com/{slug}</span></li>
-      <li><span class="modal-market-name">GitHub raw</span> — <span class="modal-market-fmt">https://raw.githubusercontent.com/{owner}/{repo}/{branch}/SKILL.md</span></li>
-    </ul>
-    <div class="form-group"><label>URL</label><input id="installUrl" placeholder="https://skills.sh/owner/repo/skill"></div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary btn-sm" onclick="hideModal('installModal')">取消</button>
-      <button class="btn btn-primary btn-sm" onclick="doInstall()">安装</button>
-    </div>
-  </div>
-</div>
-
-<!-- Create Skill Modal -->
-<div class="modal-overlay" id="createModal">
-  <div class="modal modal-lg">
-    <div class="modal-title">创建自定义 Skill</div>
-    <div class="form-group"><label>名称</label><input id="createName" placeholder="my-skill"></div>
-    <div class="form-group"><label>内容 (SKILL.md)</label><textarea id="createContent" style="min-height:160px" placeholder="---&#10;name: my-skill&#10;description: ...&#10;---&#10;&#10;# My Skill&#10;..."></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary btn-sm" onclick="hideModal('createModal')">取消</button>
-      <button class="btn btn-primary btn-sm" onclick="doCreate()">创建</button>
-    </div>
-  </div>
-</div>
-
-<!-- Skill Detail Modal -->
-<div class="modal-overlay" id="skillDetailModal">
-  <div class="modal modal-lg" style="max-width:640px">
-    <div class="modal-title" id="skillDetailTitle">Skill 详情</div>
-    <pre id="skillDetailContent" class="blueprint-content" style="max-height:60vh"></pre>
-    <div class="modal-footer">
-      <button class="btn btn-secondary btn-sm" onclick="hideModal('skillDetailModal')">关闭</button>
-    </div>
-  </div>
-</div>
-
 <!-- Add MCP Modal -->
 <div class="modal-overlay" id="mcpCreateModal">
   <div class="modal modal-lg">
     <div class="modal-title">新增 MCP 服务</div>
-    <div class="modal-sub">选择传输类型：stdio（本地命令）或 SSE（远程服务器 URL）</div>
-    <div class="form-group"><label>名称</label><input id="mcpName" placeholder="filesystem"></div>
-    <div class="form-group">
-      <label>传输类型</label>
-      <select id="mcpTransport" onchange="onMCPTransportChange()">
-        <option value="stdio">stdio（本地命令）</option>
-        <option value="sse">SSE（远程服务器）</option>
-      </select>
+    <div class="modal-sub">stdio（本地命令）或 SSE（远程服务器 URL）</div>
+    <div class="form-row">
+      <div class="form-group"><label>名称</label><input id="mcpName" placeholder="filesystem"></div>
+      <div class="form-group">
+        <label>传输类型</label>
+        <select id="mcpTransport" onchange="onMCPTransportChange()">
+          <option value="stdio">stdio</option>
+          <option value="sse">SSE</option>
+        </select>
+      </div>
     </div>
     <div id="mcpStdioFields">
       <div class="form-group">
-        <label>命令与参数（数组，每行一项）</label>
-        <div id="mcpCommandArgsList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="addMCPArgvRow()">+ 添加一项</button>
+        <label>命令与参数</label>
+        <div id="mcpCommandArgsList"></div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addMCPArgvRow()">+ 添加参数</button>
       </div>
     </div>
     <div id="mcpSSEFields" style="display:none">
@@ -431,7 +226,7 @@
     </div>
     <div class="form-group">
       <label>环境变量</label>
-      <div id="mcpEnvList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <div id="mcpEnvList"></div>
       <button type="button" class="btn btn-secondary btn-sm" onclick="addMCPEnvRow()">+ 添加环境变量</button>
     </div>
     <div class="modal-footer">
@@ -445,7 +240,7 @@
 <div class="modal-overlay" id="envHintModal">
   <div class="modal">
     <div class="modal-title" id="envHintModalTitle">安装说明</div>
-    <div id="envHintModalContent" style="font-size:14px;color:var(--text-secondary);line-height:1.65;white-space:pre-line;max-height:55vh;overflow:auto"></div>
+    <div id="envHintModalContent"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary btn-sm" onclick="hideModal('envHintModal')">关闭</button>
     </div>

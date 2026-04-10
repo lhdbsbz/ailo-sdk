@@ -57,42 +57,29 @@ export type SkillMeta = {
 export type ToolCapability = {
   name: string;
   description?: string;
-  parameters?: Record<string, unknown>; // JSON Schema
+  parameters?: Record<string, unknown>;
 };
 
 // ─── Capability constants ─────────────────────────────────────────────────────
 
 export const CAP_MESSAGE = "message";
-export const CAP_WORLD_UPDATE = "world_update";
 export const CAP_TOOL_EXECUTE = "tool_execute";
 export const CAP_INTENT = "intent";
 export const CAP_SIGNAL = "signal";
 
 // ─── Inbound message types (endpoint → server) ────────────────────────────────
 
-/** Message sent via endpoint.accept. Stream grouping and reply routing via contextTags (groupWith, passToTool). */
 export type AcceptMessage = {
   content: ContentPart[];
   contextTags: ContextTag[];
-  requiresResponse?: boolean;
-};
-
-/** Payload for world_update */
-export type WorldUpdatePayload = {
-  mode: string;
-  obstacles?: [number, number, number]; // front, left, right distances (cm)
-  pir_active?: boolean;
-  image_base64?: string; // JPEG frame for scene understanding
-  voice_text?: string;   // Whisper transcription
-  reason?: string;       // "frame_diff"|"voice"|"pir_wake"|"mode_changed"|"reconnect"
 };
 
 /** Payload for tool_response */
 export type ToolResponsePayload = {
-  id: string;      // correlates to incoming ToolRequestPayload.id
+  id: string;
   success: boolean;
   error?: string;
-  /** Unified response format. Structured payloads should be encoded as JSON text in a single text part. */
+  result?: unknown;
   content?: ContentPart[];
 };
 
@@ -108,41 +95,35 @@ export type EntityPayload = {
   source?: string;
 };
 
-/** Received via world_enrichment event */
 export type WorldEnrichmentPayload = {
   entities: EntityPayload[];
   scene_description?: string;
 };
 
-/** Received via intent event */
 export type IntentPayload = {
-  action: string;   // "sleep"|"scan"|"converse"|"follow"|"patrol"|"clean"|"low_balance"
+  action: string;
   target?: EntityPayload;
   params?: Record<string, unknown>;
 };
 
-/** Received via tool_request event */
 export type ToolRequestPayload = {
   id: string;
   name: string;
   args: Record<string, unknown>;
 };
 
-/** Received via stream event — carries live text chunks from the server */
 export type StreamPayload = {
   streamId: string;
   action: "start" | "chunk" | "end";
-  text?: string;           // present when action="chunk"
-  correlationId?: string;  // links to the accept/world_update that triggered the stream
+  text?: string;
+  correlationId?: string;
 };
 
-/** Received via file_fetch request — server asks endpoint to upload a local file */
 export type FileFetchRequest = {
-  path: string;             // local path on the endpoint
-  upload_url: string;       // Blob API upload URL
+  path: string;
+  upload_url: string;
 };
 
-/** Response to file_fetch — endpoint returns after uploading */
 export type FileFetchResponse = {
   blob_id: string;
   file_ref: string;
@@ -150,7 +131,6 @@ export type FileFetchResponse = {
   size: number;
 };
 
-/** Received via dir_list request — server asks endpoint to list a local directory */
 export type DirListRequest = {
   path: string;
 };
@@ -166,8 +146,6 @@ export type DirListResponse = {
   entries: DirListEntry[];
 };
 
-/** Received via file_push request — server asks endpoint to download a file and save locally.
- *  When local_source is present, the file is on the same filesystem — do a local copy instead of download. */
 export type FilePushRequest = {
   url?: string;
   local_source?: string;
@@ -178,13 +156,11 @@ export type FilePushResponse = {
   size: number;
 };
 
-/** Filesystem probe marker — written on connect, used to detect co-located endpoints */
 export type FsProbeMarker = {
   path: string;
   nonce: string;
 };
 
-/** Received via fs_probe request — server asks endpoint to read a probe file */
 export type FsProbeRequest = {
   path: string;
 };
@@ -196,42 +172,28 @@ export type FsProbeResponse = {
 
 // ─── Incremental capability update ────────────────────────────────────────────
 
-/** Parameters for endpoint.update — incremental register/unregister of capabilities */
 export type EndpointUpdateParams = {
   register?: {
     tools?: ToolCapability[];
-    blueprints?: string[];
+    mcpTools?: ToolCapability[];
     skills?: SkillMeta[];
-    caps?: string[];
     instructions?: string;
   };
   unregister?: {
-    tools?: string[];
-    blueprints?: string[];
-    skills?: string[];
-    caps?: string[];
+    tools?: boolean;
+    mcpTools?: boolean;
+    skills?: boolean;
   };
 };
 
 // ─── Tool handler ─────────────────────────────────────────────────────────────
 
-/** Tool handler return type: ContentPart[] for direct multimodal results; any other value is serialized into a text ContentPart. */
 export type ToolHandler = (args: Record<string, unknown>) => Promise<ContentPart[] | unknown>;
 
-// ─── Storage interface ────────────────────────────────────────────────────────
+// ─── Local persistence ────────────────────────────────────────────────────────
 
 export interface EndpointStorage {
   getData(key: string): Promise<string | null>;
   setData(key: string, value: string): Promise<void>;
   deleteData(key: string): Promise<void>;
-}
-
-// ─── Health status ────────────────────────────────────────────────────────────
-
-export type HealthStatus = "connected" | "reconnecting" | "error";
-
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
-export function getWorkDir(): string | null {
-  return null;
 }

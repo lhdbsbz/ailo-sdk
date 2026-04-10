@@ -1,4 +1,4 @@
-import type { ToolCapability } from "@lmcl/ailo-endpoint-sdk";
+import type { ToolCapability } from "@greatlhd/ailo-endpoint-sdk";
 
 export type SceneId =
   | "home"

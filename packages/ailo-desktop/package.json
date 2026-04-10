@@ -1,7 +1,7 @@
 {
-  "name": "@lmcl/ailo-desktop",
-  "version": "1.0.0",
-  "description": "Ailo 超级端点 — 桌面能力 + 飞书 + 钉钉 + QQ + 邮件，按需配置启用",
+  "name": "@greatlhd/ailo-desktop",
+  "version": "1.0.2",
+  "description": "Ailo 超级端点 — 文件/代码/MCP/Web + 网页聊天。支持桌面模式与服务器模式。外部通道（飞书/微信）已内置在 Ailo 主进程。",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,25 +9,19 @@
     "ailo-desktop": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node copy-static.mjs",
+    "build": "tsc && node ../../scripts/copy-static.mjs",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.56.1",
-    "@lmcl/ailo-endpoint-sdk": "*",
-    "dingtalk-stream": "^2.0.4",
-    "glob": "^11.0.0",
-    "imapflow": "^1.2.10",
-    "mailparser": "^3.6.6",
-    "nodemailer": "^8.0.1",
-    "playwright": "^1.50.0",
+    "@greatlhd/ailo-endpoint-sdk": "^1.0.2",
+    "turndown": "^7.2.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/mailparser": "^3.4.5",
     "@types/node": "^22.0.0",
-    "@types/nodemailer": "^6.4.17",
+    "@types/turndown": "^5.0.6",
     "@types/ws": "^8.5.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"

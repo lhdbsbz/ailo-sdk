@@ -1,22 +1,317 @@
-# Ailo Endpoint Protocol v3
+# Ailo Endpoint Protocol v4
 
-## Overview
+## Language / 语言索引
 
-Ailo Endpoint Protocol is a unified bidirectional communication protocol between the Ailo server and all external endpoints.
-
-An **Endpoint** is any entity that connects to Ailo: a chat bot, Lark/Feishu, web chat, a camera, an IoT gateway, a desktop agent, etc. All endpoints use the same protocol and declare different **capabilities (caps)** to determine which message types they send and receive.
-
-**Authentication**: Endpoints authenticate using a pre-created **API Key** from the Ailo admin dashboard.
+- [English Version](#english)
+- [中文版本](#中文)
 
 ---
 
-## 1. Frame Format
+## English
 
-All messages are JSON with a shared top-level structure:
+### Overview
+
+This document describes how to connect your application (chatbot, desktop assistant, IoT device, etc.) to the Ailo consciousness core.
+
+**Core Concepts:**
+- **Endpoint**: Any application that connects to Ailo
+- **Self-Describing**: Endpoints directly report their capabilities (tools, MCP tools, skills)
+- **Atomic Aggregation**: Server aggregates tools/skills by matching `name + description` hash
+- **EndpointID**: Every tool call must specify the target endpoint
+
+---
+
+### 1. Connection Flow
+
+#### 1.1 Handshake
+
+The first frame sent by an endpoint must be a `connect` request:
 
 ```json
 {
-  "type": "req|res|event|signal",
+  "type": "req",
+  "id": "c1",
+  "method": "connect",
+  "params": {
+    "role": "endpoint",
+    "apiKey": "ailo_ep_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "endpointId": "my-app-01",
+    "caps": ["message", "tool_execute"],
+    "sdkVersion": "1.0.0",
+    "tools": [...],
+    "mcpTools": [...],
+    "skills": [...],
+    "instructions": "A brief description of this endpoint"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `role` | ✅ | Fixed value: `"endpoint"` |
+| `apiKey` | ✅ | API Key created in admin dashboard |
+| `endpointId` | ✅ | Unique identifier for your app (must be unique globally) |
+| `caps` | ✅ | Declared capabilities |
+| `sdkVersion` | ❌ | SDK version |
+| `tools` | ❌ | Native tools defined by this endpoint |
+| `mcpTools` | ❌ | MCP extension tools |
+| `skills` | ❌ | Extended knowledge modules |
+| `instructions` | ❌ | Brief description of this endpoint |
+
+**Success Response:**
+
+```json
+{
+  "type": "res",
+  "id": "c1",
+  "ok": true,
+  "payload": {
+    "connId": "conn_1234567890",
+    "protocol": 4
+  }
+}
+```
+
+**Error Response (Duplicate endpointId):**
+
+```json
+{
+  "type": "res",
+  "id": "c1",
+  "ok": false,
+  "error": {
+    "code": "DUPLICATE_ENDPOINT",
+    "message": "endpoint \"my-app-01\" is already registered"
+  }
+}
+```
+
+---
+
+### 2. Capabilities
+
+| Value | Description |
+|-------|-------------|
+| `message` | Receive user messages |
+| `tool_execute` | Execute tool calls |
+| `intent` | Receive intent commands |
+
+---
+
+### 3. Tool Definition
+
+#### 3.1 Tool Structure
+
+```json
+{
+  "name": "read_file",
+  "description": "Read file content from local disk",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute file path"
+      }
+    },
+    "required": ["path"]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Tool name (unique within endpoint) |
+| `description` | string | Tool description for LLM |
+| `parameters` | object | JSON Schema for parameters |
+
+#### 3.2 MCP Tools
+
+MCP tools have the same structure as regular tools, prefixed with the MCP server name:
+
+```json
+{
+  "name": "filesystem:read_file",
+  "description": "List directory contents",
+  "parameters": {...}
+}
+```
+
+---
+
+### 4. Skills
+
+#### 4.1 Skill Structure
+
+```json
+{
+  "name": "git-guide",
+  "description": "Git usage guide",
+  "content": "# Git Guide\n\n## Basic Commands\n..."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique skill name |
+| `description` | string | Brief description |
+| `content` | string | Full documentation (Markdown, optional) |
+
+#### 4.2 Querying Skills
+
+Use the `get_skills` tool to query skills:
+
+```json
+// Query all skills
+{"endpoint_id": "", "skill_name": ""}
+
+// Query skills from a specific endpoint
+{"endpoint_id": "desktop-01", "skill_name": ""}
+
+// Get skill details
+{"endpoint_id": "desktop-01", "skill_name": "git-guide"}
+```
+
+---
+
+### 5. Server-Side Aggregation
+
+#### 5.1 Matching Rule
+
+```
+Tool Match Key = hash(tool.name + "|" + tool.description)
+Skill Match Key = hash(skill.name + "|" + skill.description)
+
+- Same key = same tool/skill (aggregated)
+- Different key = different tool/skill (even if name is same)
+```
+
+#### 5.2 Aggregation Result
+
+For tools with same match key from multiple endpoints:
+
+```json
+{
+  "name": "read_file",
+  "description": "⚠️ 注意：不同端点的用法不同！\n\n【端点 1】desktop-01\nRead file from local disk\n\n【端点 2】server-01\nRead file from server, supports remote paths\n\n可用端点：desktop-01, server-01",
+  "parameters": {
+    "oneOf": [
+      {
+        "type": "object",
+        "description": "Read file from local disk",
+        "properties": {
+          "endpointId": { "type": "string", "const": "desktop-01" },
+          "path": { "type": "string" }
+        },
+        "required": ["endpointId", "path"]
+      },
+      {
+        "type": "object",
+        "description": "Read file from server",
+        "properties": {
+          "endpointId": { "type": "string", "const": "server-01" },
+          "path": { "type": "string" },
+          "timeout": { "type": "number" }
+        },
+        "required": ["endpointId", "path", "timeout"]
+      }
+    ]
+  }
+}
+```
+
+#### 5.3 Uniform Schema Optimization
+
+If all endpoints with same tool have identical parameters, the server uses a unified schema:
+
+```json
+{
+  "name": "read_file",
+  "description": "Read file content.\n\n可用端点：desktop-01, server-01",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "endpointId": {
+        "type": "string",
+        "enum": ["desktop-01", "server-01"]
+      },
+      "path": { "type": "string" }
+    },
+    "required": ["endpointId", "path"]
+  }
+}
+```
+
+---
+
+### 6. Dynamic Updates
+
+#### 6.1 Update Request
+
+```json
+{
+  "type": "req",
+  "method": "endpoint.update",
+  "params": {
+    "register": {
+      "tools": [...],
+      "mcpTools": [...],
+      "skills": [...]
+    },
+    "unregister": {
+      "tools": true,
+      "mcpTools": true,
+      "skills": true
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `register` | Full replacement for the category |
+| `unregister.tools` | Set to `true` to clear all native tools |
+| `unregister.mcpTools` | Set to `true` to clear all MCP tools |
+| `unregister.skills` | Set to `true` to clear all skills |
+
+#### 6.2 Update Response
+
+```json
+{
+  "type": "res",
+  "ok": true,
+  "payload": {
+    "updated": true
+  }
+}
+```
+
+---
+
+### 7. Connection Lifecycle
+
+#### 7.1 WebSocket Disconnect
+
+When WebSocket disconnects, the server:
+1. Removes all endpoint data (tools, mcpTools, skills, instructions)
+2. Triggers tool registry refresh
+3. LLM sees updated tools/skills in next request
+
+#### 7.2 Reconnection
+
+On reconnect, the endpoint should:
+1. Send full `connect` request with current tools/skills
+2. Server will reject if endpointId is already registered by another connection
+
+---
+
+### 8. Message Format
+
+#### 8.1 Common Frame Format
+
+```json
+{
+  "type": "req|res|event",
   "id": "correlation-id",
   "method": "method-name",
   "params": {},
@@ -28,230 +323,11 @@ All messages are JSON with a shared top-level structure:
 }
 ```
 
-| Field | Type | Description | Present in |
-|-------|------|-------------|-----------|
-| `type` | string | `"req"` / `"res"` / `"event"` / `"signal"` | always |
-| `id` | string | Request/response correlation ID | req / res / signal |
-| `method` | string | Method name | req |
-| `params` | object | Method parameters | req |
-| `ok` | boolean | Success flag | res |
-| `payload` | object | Response data or signal data | res / signal |
-| `error` | object | Error details | res (on failure) |
-| `event` | string | Event name | event |
-| `seq` | number | Event sequence number | event |
-
 ---
 
-## 2. Connection Roles
+### 9. Endpoint → Server
 
-| Role | Description |
-|------|-------------|
-| `endpoint` | External endpoint (bot, Lark, camera, IoT, etc.), authenticated via API Key |
-| `client` | Web UI, CLI tools, etc. — localhost only |
-
-Only one active connection per `endpointId` is allowed. When a new connection arrives, the old one is automatically disconnected (handles network reconnects and TCP half-open scenarios).
-
----
-
-## 3. Capabilities (Caps)
-
-Endpoints declare their capabilities during the connection handshake. The server uses these to route messages and validate permissions.
-
-| Cap | Description | Endpoint → Server | Server → Endpoint |
-|-----|-------------|-------------------|-------------------|
-| `message` | Chat messages | `endpoint.accept` | `tool_request` (send reply) |
-| `world_update` | Perception updates | `world_update` | `world_enrichment` |
-| `tool_execute` | Tool execution | `tool_response` | `tool_request` |
-| `intent` | Intent delivery | — | `intent` |
-| `signal` | Signaling | `signal` | `signal` |
-| *(common)* | Logging/health/storage | `endpoint.health`, `endpoint.log`, `endpoint.data.*` | — |
-
----
-
-## 4. Blueprints
-
-A **Blueprint** is a standalone endpoint specification document, addressed by URL. It defines the capabilities, tools, and usage instructions for a class of endpoints.
-
-Key properties:
-- **Standalone**: Blueprints exist independently of any endpoint — host them on GitHub, a CDN, or your own server
-- **N:M relationship**: One endpoint can reference multiple blueprints; one blueprint can be referenced by multiple endpoints
-- **Deduplication**: 10 endpoint instances sharing the same blueprint → only one copy of the instructions is shown, plus a list of instances
-- **Standardizable**: Blueprints can become industry standards — any vendor following the same blueprint is automatically supported
-- **Tool definitions**: YAML frontmatter defines standard tools (JSON Schema); endpoints can declare additional private tools
-
-### 4.1 Blueprint Document Format
-
-Markdown + YAML frontmatter. The frontmatter defines metadata and tool schemas; the body provides human-readable usage instructions.
-
-```yaml
----
-name: sweeper-robot
-version: 1.0.0
-description: Smart sweeping robot
-tools:
-  - name: start_clean
-    description: Start a cleaning task
-    timeout: 10
-    parameters:
-      type: object
-      properties:
-        mode: { type: string, enum: [auto, spot, edge] }
-        room: { type: string }
-      required: [mode]
-  - name: stop
-    description: Stop cleaning
-    timeout: 5
-  - name: get_status
-    description: Get current status
----
-## Endpoint Description
-Smart sweeping robot with autonomous navigation, scheduled cleaning, and zone cleaning.
-
-## Use Cases
-- When a user asks to clean a specific room
-- When a scheduled task triggers
-
-## Tool Usage
-### start_clean
-Start a cleaning task.
-- mode: "auto" (automatic), "spot" (spot clean), "edge" (edge clean)
-- room: optional, specify a room name
-
-### stop
-Stop the current cleaning task.
-
-## Constraints
-- Automatically returns to charging dock on low battery
-- Cannot take photos while cleaning
-```
-
-### 4.2 Tool Execution Semantics
-
-All tool calls are **synchronous** at the protocol level (the server waits for `tool_response` before continuing). Blueprint tool definitions support:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `timeout` | number | Execution timeout in seconds (default: 30) |
-| `async` | boolean | When `true`, the tool should immediately return a `taskId`; the actual result is delivered asynchronously via `endpoint.accept` |
-
-### 4.3 Tool Naming and Routing
-
-Blueprint tools are registered as `blueprintName:toolName`, with an `endpointId` parameter automatically injected for routing to specific instances:
-
-```
-Call:     sweeper-robot:start_clean(endpointId="robot-02", mode="auto")
-Server:   find connection with endpointId="robot-02" → send tool_request
-Endpoint: execute start_clean(mode="auto") → return tool_response
-```
-
-Private tools (not in any blueprint) are registered as `endpointId:toolName` and route directly to that endpoint without an `endpointId` parameter.
-
-### 4.4 Blueprint References at Connect Time
-
-Endpoints reference blueprints via the `blueprints` field during `connect`:
-
-```json
-{
-  "blueprints": ["https://blueprints.example.com/sweeper-robot/v1.md"],
-  "tools": [{ "name": "debug_dump", "description": "Dev debugging tool" }],
-  "instructions": "This unit is in the living room, ~20 sqm"
-}
-```
-
-- `blueprints`: Array of blueprint URLs; the server fetches and caches them
-- `tools`: Private tools not covered by any blueprint
-- `instructions`: Private notes appended after blueprint content
-
----
-
-## 5. Connection Lifecycle
-
-### 5.1 Handshake
-
-**The first frame must be a `connect` request** carrying the API Key and capability declarations.
-
-```json
-{
-  "type": "req",
-  "id": "c1",
-  "method": "connect",
-  "params": {
-    "role": "endpoint",
-    "apiKey": "ailo_ep_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "endpointId": "robot-01",
-    "caps": ["world_update", "tool_execute", "intent"],
-    "sdkVersion": "1.0.0",
-    "blueprints": [
-      "https://blueprints.example.com/companion-robot/v1.md"
-    ],
-    "tools": [
-      { "name": "debug_dump", "description": "Dev debugging, export internal state" }
-    ],
-    "instructions": "This robot is in the living room, ~20 sqm"
-  }
-}
-```
-
-- `blueprints`: Blueprint URL array. The server fetches and caches the documents, extracting tool definitions and usage instructions. When multiple endpoints reference the same blueprint, tools are registered once (routed via the `endpointId` parameter).
-- `tools`: Only for private tools not in any blueprint.
-- `instructions`: Private notes appended after blueprint content.
-
-**Success response**
-
-```json
-{
-  "type": "res",
-  "id": "c1",
-  "ok": true,
-  "payload": {
-    "connId": "conn_1234567890",
-    "protocol": 3
-  }
-}
-```
-
-**Failure response**
-
-```json
-{
-  "type": "res",
-  "id": "c1",
-  "ok": false,
-  "error": { "code": "AUTH_FAILED", "message": "invalid apiKey" }
-}
-```
-
-### 5.2 API Key Management
-
-API Keys are created and managed in the **Ailo admin dashboard**. No code-level registration is needed.
-
-| REST API | Method | Description |
-|---------|--------|-------------|
-| `/api/endpoint-keys` | GET | List all keys (values are masked) |
-| `/api/endpoint-keys/:id` | GET | Get single key by ID (for admin detail view) |
-| `/api/endpoint-keys` | POST | Create a key (body: `label`) |
-| `/api/endpoint-keys/:id` | DELETE | Revoke a key |
-
-Create response example (**the full key is only returned at creation time**; subsequent queries are masked):
-
-```json
-{
-  "key": {
-    "id": "epk_a1b2c3d4e5f6g7h8",
-    "key": "ailo_ep_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "label": "Living Room Robot",
-    "createdAt": "2026-01-01T00:00:00Z"
-  }
-}
-```
-
----
-
-## 6. Endpoint → Server Methods
-
-### 6.1 endpoint.accept (cap: message)
-
-Submit a user message or perception signal for processing.
+#### 9.1 Send Message (endpoint.accept)
 
 ```json
 {
@@ -260,332 +336,442 @@ Submit a user message or perception signal for processing.
   "method": "endpoint.accept",
   "params": {
     "content": [
-      { "type": "text", "text": "Hello" },
-      {
-        "type": "image",
-        "media": { "type": "image", "url": "https://example.com/img.jpg", "mime": "image/jpeg" }
-      }
+      { "type": "text", "text": "User message" }
     ],
     "contextTags": [
-      { "kind": "participant", "value": "Alice", "groupWith": true },
       { "kind": "chat_id", "value": "oc_xxx", "groupWith": true, "passToTool": true }
-    ],
-    "requiresResponse": true
+    ]
   }
 }
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `content` | Yes* | Content array (`requiresResponse: true` requires at least one item) |
-| `contextTags` | No | Context tags for stream grouping and reply routing (via `groupWith` and `passToTool` flags) |
-| `requiresResponse` | No | Default `true`. Set to `false` for passive perception — allows empty `content`, does not trigger a response |
-
-### 6.2 world_update (cap: world_update)
-
-Report sensor/perception data for scene understanding.
+#### 9.2 Tool Response (tool_response)
 
 ```json
 {
   "type": "req",
-  "id": "w1",
-  "method": "world_update",
-  "params": {
-    "mode": "aware",
-    "obstacles": [120.5, 200.0, 85.3],
-    "pir_active": true,
-    "image_base64": "/9j/4AAQ...",
-    "voice_text": "",
-    "reason": "frame_diff"
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `mode` | Current operating mode: `"sleep"` \| `"aware"` \| `"companion"` \| `"pet_follow"` \| `"patrol"` |
-| `obstacles` | Ultrasonic distances [front, left, right] in cm |
-| `pir_active` | Whether PIR sensor is triggered |
-| `image_base64` | Current JPEG frame as base64 (sent when frame difference detected) |
-| `voice_text` | Speech-to-text result (sent when voice detected) |
-| `reason` | Report trigger: `"frame_diff"` \| `"voice"` \| `"pir_wake"` \| `"mode_changed"` \| `"reconnect"` |
-
-### 6.3 tool_response (cap: tool_execute)
-
-Return tool execution results, correlated with the `tool_request` via its `id`.
-
-`tool_response` uses a single unified format:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Correlates to the `tool_request.id` |
-| `success` | boolean | Whether execution succeeded |
-| `error` | string | Error message (on failure) |
-| `content` | ContentPart[] | Same structure as `endpoint.accept` content — supports text, image, audio, video, and mixed content. Structured payloads should be encoded as JSON text in a single `text` part. |
-
-**Structured JSON example** (`dir_list` style payload in a single text part):
-
-```json
-{
-  "type": "req",
-  "id": "r1",
   "method": "tool_response",
   "params": {
     "id": "req_001",
     "success": true,
-    "content": [
-      { "type": "text", "text": "{\"entries\":[{\"name\":\"notes.txt\",\"type\":\"file\",\"size\":128}]}" }
-    ]
+    "result": { "screenshot": "base64..." }
   }
 }
-```
-
-**Multimodal example** (screenshot tool returning an image):
-
-```json
-{
-  "type": "req",
-  "id": "r2",
-  "method": "tool_response",
-  "params": {
-    "id": "req_002",
-    "success": true,
-    "content": [
-      { "type": "text", "text": "Screenshot captured" },
-      {
-        "type": "image",
-        "media": {
-          "type": "image",
-          "base64": "/9j/4AAQ...",
-          "mime": "image/png",
-          "name": "screenshot.png"
-        }
-      }
-    ]
-  }
-}
-```
-
-### 6.4 endpoint.health
-
-Report platform/hardware health status.
-
-```json
-{
-  "type": "req",
-  "id": "h1",
-  "method": "endpoint.health",
-  "params": {
-    "status": "connected",
-    "detail": ""
-  }
-}
-```
-
-### 6.5 endpoint.log
-
-Forward log entries to the server (useful when local stdout is occupied, e.g. MCP child processes).
-
-```json
-{
-  "type": "req",
-  "id": "l1",
-  "method": "endpoint.log",
-  "params": {
-    "level": "info",
-    "message": "Whisper model loaded",
-    "data": { "model": "tiny", "elapsed_ms": 843 }
-  }
-}
-```
-
-### 6.6 endpoint.data.*
-
-Per-endpoint key-value storage (isolated by `endpointId`).
-
-```json
-{ "type": "req", "id": "d1", "method": "endpoint.data.get", "params": { "key": "user_prefs" } }
-{ "type": "req", "id": "d2", "method": "endpoint.data.set", "params": { "key": "user_prefs", "value": "{...}" } }
-{ "type": "req", "id": "d3", "method": "endpoint.data.delete", "params": { "key": "user_prefs" } }
 ```
 
 ---
 
-## 7. Server → Endpoint Messages
+### 10. Server → Endpoint
 
-The server pushes events via `event` frames. No prior request from the endpoint is needed.
-
-### 7.1 world_enrichment (cap: world_update)
-
-Returns scene understanding results, typically in response to a `world_update`.
-
-```json
-{
-  "type": "event",
-  "event": "world_enrichment",
-  "seq": 1,
-  "payload": {
-    "entities": [
-      { "type": "cat", "position": { "x": 200, "y": 150 }, "size": 0.12, "confidence": 0.93 },
-      { "type": "furniture", "position": { "x": 50, "y": 200 }, "size": 0.4 }
-    ],
-    "scene_description": "An orange cat is walking on the living room floor"
-  }
-}
-```
-
-### 7.2 intent (cap: intent)
-
-Delivers a high-level intent. The endpoint decides how to execute it autonomously.
-
-```json
-{
-  "type": "event",
-  "event": "intent",
-  "seq": 2,
-  "payload": {
-    "action": "follow",
-    "target": { "type": "cat", "position": { "x": 200, "y": 150 }, "size": 0.12 },
-    "params": { "style": "playful" }
-  }
-}
-```
-
-| Action | Description |
-|--------|-------------|
-| `sleep` | Enter deep standby |
-| `scan` | Enter perception mode |
-| `converse` | Enter conversation/companion mode |
-| `follow` | Follow the target entity |
-| `patrol` | Autonomous patrol |
-| `clean` | Cleaning mode |
-| `low_balance` | Insufficient credits notification |
-
-### 7.3 tool_request (cap: tool_execute)
-
-Instructs the endpoint to execute a specific tool. The endpoint must respond with a corresponding `tool_response`.
+#### 10.1 Tool Call (tool_request)
 
 ```json
 {
   "type": "event",
   "event": "tool_request",
-  "id": "req_001",
-  "seq": 3,
   "payload": {
     "id": "req_001",
-    "name": "play_audio",
-    "args": {
-      "audio_base64": "UklGR...",
-      "expression": "talking"
+    "name": "read_file",
+    "args": { "endpointId": "desktop-01", "path": "/tmp/test.txt" }
+  }
+}
+```
+
+#### 10.2 Intent Push (intent)
+
+```json
+{
+  "type": "event",
+  "event": "intent",
+  "payload": {
+    "action": "follow",
+    "target": { "type": "person", "position": { "x": 100, "y": 200 } }
+  }
+}
+```
+
+| action | Description |
+|--------|-------------|
+| `follow` | Follow target |
+| `scan` | Enter perception mode |
+| `sleep` | Enter standby |
+| `clean` | Cleaning mode |
+
+---
+
+## 中文
+
+### 概述
+
+本文档描述如何将你的应用（聊天机器人、桌面助手、IoT 设备等）连接到 Ailo 意识核心。
+
+**核心概念：**
+- **端点 (Endpoint)**：连接到 Ailo 的任何应用程序
+- **自描述**：端点直接上报自己的能力（工具、MCP 工具、Skill）
+- **原子化聚合**：服务端按 `name + description` 哈希匹配聚合工具/Skill
+- **EndpointID**：每次工具调用必须指定目标端点
+
+---
+
+### 1. 连接流程
+
+#### 1.1 握手
+
+端点发送的第一个帧必须是 `connect` 请求：
+
+```json
+{
+  "type": "req",
+  "id": "c1",
+  "method": "connect",
+  "params": {
+    "role": "endpoint",
+    "apiKey": "ailo_ep_xxx",
+    "endpointId": "my-desktop-01",
+    "caps": ["message", "tool_execute"],
+    "sdkVersion": "1.0.0",
+    "tools": [...],
+    "mcpTools": [...],
+    "skills": [...],
+    "instructions": "我的 MacBook Pro，具备截图、浏览器自动化等能力"
+  }
+}
+```
+
+| 字段 | 必填 | 描述 |
+|------|------|------|
+| `role` | ✅ | 固定值：`"endpoint"` |
+| `apiKey` | ✅ | 在管理后台创建的 API Key |
+| `endpointId` | ✅ | 端点唯一标识（全局唯一，重复将拒绝注册） |
+| `caps` | ✅ | 声明的能力 |
+| `tools` | ❌ | 端点原生工具列表 |
+| `mcpTools` | ❌ | MCP 扩展工具列表 |
+| `skills` | ❌ | 技能文档列表 |
+| `instructions` | ❌ | 端点描述（一句话） |
+
+**成功响应：**
+
+```json
+{
+  "type": "res",
+  "id": "c1",
+  "ok": true,
+  "payload": {
+    "connId": "conn_1234567890",
+    "protocol": 4
+  }
+}
+```
+
+**错误响应（endpointId 重复）：**
+
+```json
+{
+  "type": "res",
+  "id": "c1",
+  "ok": false,
+  "error": {
+    "code": "DUPLICATE_ENDPOINT",
+    "message": "endpoint \"my-desktop-01\" is already registered"
+  }
+}
+```
+
+---
+
+### 2. 能力
+
+| 值 | 描述 |
+|---|------|
+| `message` | 接收用户消息 |
+| `tool_execute` | 执行工具调用 |
+| `intent` | 接收意图命令 |
+
+---
+
+### 3. 工具定义
+
+#### 3.1 工具结构
+
+```json
+{
+  "name": "read_file",
+  "description": "读取本地磁盘文件",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "文件绝对路径"
+      }
+    },
+    "required": ["path"]
+  }
+}
+```
+
+#### 3.2 MCP 工具
+
+MCP 工具结构与普通工具相同，带有 MCP 服务器名前缀：
+
+```json
+{
+  "name": "filesystem:read_file",
+  "description": "列出目录内容",
+  "parameters": {...}
+}
+```
+
+---
+
+### 4. Skills
+
+#### 4.1 Skill 结构
+
+```json
+{
+  "name": "git-guide",
+  "description": "Git 使用指南",
+  "content": "# Git 使用指南\n\n## 基本命令\n..."
+}
+```
+
+#### 4.2 查询 Skills
+
+使用 `get_skills` 工具查询：
+
+```json
+// 查询所有 Skills
+{"endpoint_id": "", "skill_name": ""}
+
+// 查询特定端点的 Skills
+{"endpoint_id": "desktop-01", "skill_name": ""}
+
+// 获取 Skill 详情
+{"endpoint_id": "desktop-01", "skill_name": "git-guide"}
+```
+
+---
+
+### 5. 服务端聚合
+
+#### 5.1 匹配规则
+
+```
+工具匹配 Key = hash(tool.name + "|" + tool.description)
+Skill 匹配 Key = hash(skill.name + "|" + skill.description)
+
+- 相同 Key = 相同工具/Skill（聚合）
+- 不同 Key = 不同工具/Skill（即使 name 相同）
+```
+
+#### 5.2 聚合结果
+
+对于来自多个端点的同名工具（描述不同）：
+
+```json
+{
+  "name": "file_read",
+  "description": "⚠️ 注意：不同端点的用法不同！\n\n【端点 1】desktop-01\n读取本地磁盘文件\n\n【端点 2】server-01\n读取服务器日志，支持远程路径\n\n可用端点：desktop-01, server-01",
+  "parameters": {
+    "oneOf": [
+      {
+        "type": "object",
+        "description": "读取本地磁盘文件",
+        "properties": {
+          "endpointId": { "type": "string", "const": "desktop-01" },
+          "path": { "type": "string" }
+        },
+        "required": ["endpointId", "path"]
+      },
+      {
+        "type": "object",
+        "description": "读取服务器日志",
+        "properties": {
+          "endpointId": { "type": "string", "const": "server-01" },
+          "path": { "type": "string" },
+          "timeout": { "type": "number" }
+        },
+        "required": ["endpointId", "path", "timeout"]
+      }
+    ]
+  }
+}
+```
+
+#### 5.3 统一 Schema 优化
+
+如果所有端点的同名工具参数完全一致，服务端使用统一 Schema：
+
+```json
+{
+  "name": "read_file",
+  "description": "读取文件内容。\n\n可用端点：desktop-01, server-01",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "endpointId": {
+        "type": "string",
+        "enum": ["desktop-01", "server-01"]
+      },
+      "path": { "type": "string" }
+    },
+    "required": ["endpointId", "path"]
+  }
+}
+```
+
+---
+
+### 6. 动态更新
+
+#### 6.1 更新请求
+
+```json
+{
+  "type": "req",
+  "method": "endpoint.update",
+  "params": {
+    "register": {
+      "tools": [...],
+      "mcpTools": [...],
+      "skills": [...]
+    },
+    "unregister": {
+      "tools": true,
+      "mcpTools": true,
+      "skills": true
     }
   }
 }
 ```
 
-### 7.4 stream (Streaming Text Output)
+| 字段 | 描述 |
+|------|------|
+| `register` | 全量替换对应类别 |
+| `unregister.tools` | 设为 `true` 清除所有原生工具 |
+| `unregister.mcpTools` | 设为 `true` 清除所有 MCP 工具 |
+| `unregister.skills` | 设为 `true` 清除所有 Skills |
 
-When the server generates long text responses, it can push them incrementally as chunks — enabling live display on robot screens, typing indicators in chat apps, etc.
-
-```json
-// Stream start
-{ "type": "event", "event": "stream", "seq": 4,
-  "payload": { "streamId": "s_001", "action": "start", "correlationId": "w1" } }
-
-// Text chunks (may occur multiple times)
-{ "type": "event", "event": "stream", "seq": 5,
-  "payload": { "streamId": "s_001", "action": "chunk", "text": "Hello! I " } }
-
-{ "type": "event", "event": "stream", "seq": 6,
-  "payload": { "streamId": "s_001", "action": "chunk", "text": "detected a cat" } }
-
-// Stream end
-{ "type": "event", "event": "stream", "seq": 7,
-  "payload": { "streamId": "s_001", "action": "end" } }
-```
-
-| Field | Description |
-|-------|-------------|
-| `streamId` | Unique identifier for this stream; shared by all frames in the same stream |
-| `action` | `"start"` / `"chunk"` / `"end"` |
-| `text` | Text content (only present when `action="chunk"`) |
-| `correlationId` | Links back to the `world_update` or `endpoint.accept` request that triggered this stream |
-
----
-
-## 8. Signals
-
-Lightweight bidirectional control frames that do not require req/res acknowledgment.
+#### 6.2 更新响应
 
 ```json
-{ "type": "signal", "id": "signal-name", "payload": {} }
+{
+  "type": "res",
+  "ok": true,
+  "payload": {
+    "updated": true
+  }
+}
 ```
 
 ---
 
-## 9. Heartbeat
+### 7. 连接生命周期
 
-The SDK uses standard WebSocket ping/pong (no application-layer frames):
+#### 7.1 WebSocket 断开
 
-- SDK sends a WS ping every 30 seconds
-- If no pong is received within 10 seconds → close the connection and trigger reconnect
-- Server marks the endpoint as offline if no ping is received for 30 seconds
+WebSocket 断开时，服务端：
+1. 移除该端点的所有数据（工具、MCP 工具、Skills、描述）
+2. 触发工具注册表刷新
+3. LLM 在下次请求时看到更新后的工具/Skills
 
----
+#### 7.2 重连
 
-## 10. Error Codes
-
-| Code | Description |
-|------|-------------|
-| `HANDSHAKE_REQUIRED` | The first frame must be a `connect` request |
-| `INVALID_PARAMS` | Invalid parameter format |
-| `AUTH_FAILED` | API Key is invalid or revoked |
-| `UNAUTHORIZED` | No permission (required cap not declared) |
-| `UNKNOWN_METHOD` | Unknown method |
-| `ERROR` | Generic error |
+重连时端点应：
+1. 发送完整的 `connect` 请求，包含当前的工具/Skills
+2. 如果 endpointId 已被其他连接注册，服务端将拒绝
 
 ---
 
-## 11. End-to-End Examples
+### 8. 消息格式
 
-### Scenario A: Robot wakes up → follows a pet
+#### 8.1 通用帧格式
 
-```
-1. Robot connects
-   Robot → Server: connect(role=endpoint, apiKey=ailo_ep_xxx, endpointId=robot-01, caps=["world_update","tool_execute","intent"])
-   Server → Robot: res(ok=true, connId=conn_xxx, protocol=3)
-
-2. PIR detects heat source, reports perception
-   Robot → Server: world_update(mode=aware, pir_active=true, image_base64=..., reason=pir_wake)
-   Server → Robot: res(ok=true)
-
-3. Server processes the scene
-   Server analyzes the image and detects a cat
-
-4. Scene understanding delivered
-   Server → Robot: event(world_enrichment, entities=[{type:cat, ...}])
-
-5. Intent delivered
-   Server → Robot: event(intent, action=follow, target={type:cat, ...})
-
-6. Robot begins execution (local PD control, no per-frame cloud guidance needed)
-
-7. Lost the pet, server requests audio playback
-   Server → Robot: event(tool_request, id=req_001, name=play_audio, args={audio_base64:...})
-   Robot → Server: tool_response(id=req_001, success=true)
+```json
+{
+  "type": "req|res|event",
+  "id": "correlation-id",
+  "method": "method-name",
+  "params": {},
+  "ok": true,
+  "payload": {},
+  "error": { "code": "...", "message": "..." },
+  "event": "event-name",
+  "seq": 1
+}
 ```
 
-### Scenario B: Lark/Feishu user sends a message
+---
 
+### 9. 端点 → 服务端
+
+#### 9.1 发送消息 (endpoint.accept)
+
+```json
+{
+  "type": "req",
+  "id": "m1",
+  "method": "endpoint.accept",
+  "params": {
+    "content": [
+      { "type": "text", "text": "用户消息" }
+    ],
+    "contextTags": [
+      { "kind": "chat_id", "value": "oc_xxx", "groupWith": true, "passToTool": true }
+    ]
+  }
+}
 ```
-1. Feishu endpoint connects
-   Feishu → Server: connect(role=endpoint, apiKey=ailo_ep_yyy, endpointId=feishu, caps=["message","tool_execute"])
-   Server → Feishu: res(ok=true, protocol=3)
 
-2. User sends a message
-   Feishu → Server: endpoint.accept(content=[{type:text,text:"Hello"}], contextTags=[{kind:"chat_id",value:"oc_xxx",groupWith:true,passToTool:true}], requiresResponse=true)
-   Server → Feishu: res(ok=true, accepted=true)
+#### 9.2 工具响应 (tool_response)
 
-3. Server processes and invokes the reply tool
-   Server → Feishu: event(tool_request, name=feishu:send, args={chat_id:oc_xxx, text:"Hello!"})
-   Feishu → Server: tool_response(id=req_xxx, success=true)
+```json
+{
+  "type": "req",
+  "method": "tool_response",
+  "params": {
+    "id": "req_001",
+    "success": true,
+    "result": { "screenshot": "base64..." }
+  }
+}
 ```
+
+---
+
+### 10. 服务端 → 端点
+
+#### 10.1 工具调用 (tool_request)
+
+```json
+{
+  "type": "event",
+  "event": "tool_request",
+  "payload": {
+    "id": "req_001",
+    "name": "read_file",
+    "args": { "endpointId": "desktop-01", "path": "/tmp/test.txt" }
+  }
+}
+```
+
+#### 10.2 意图推送 (intent)
+
+```json
+{
+  "type": "event",
+  "event": "intent",
+  "payload": {
+    "action": "follow",
+    "target": { "type": "person", "position": { "x": 100, "y": 200 } }
+  }
+}
+```
+
+| action | 描述 |
+|--------|------|
+| `follow` | 跟随目标 |
+| `scan` | 进入感知模式 |
+| `sleep` | 进入待机 |
+| `clean` | 清洁模式 |

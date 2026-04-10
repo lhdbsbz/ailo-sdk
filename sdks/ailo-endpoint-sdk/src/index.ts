@@ -1,18 +1,18 @@
 export { EndpointClient, RECONNECT_COOLDOWN_MS } from "./endpoint-client.js";
-export type { EndpointClientConfig, ConnectionOverrides } from "./endpoint-client.js";
+export type { EndpointClientConfig, ConnectionOverrides, EndpointClientOptions } from "./endpoint-client.js";
 export type { ToolRequestHandler, IntentHandler, WorldEnrichmentHandler, StreamHandler, SignalHandler, EvictedHandler } from "./endpoint-client.js";
 
 export { runEndpoint } from "./bootstrap.js";
 export type { EndpointConfig, EndpointContext, EndpointHandler } from "./bootstrap.js";
+
+export { createLocalEndpointStorage, createCachedEndpointStorage } from "./local-endpoint-storage.js";
 
 export { loadSkills } from "./skill-loader.js";
 
 export {
   textPart,
   mediaPart,
-  getWorkDir,
   CAP_MESSAGE,
-  CAP_WORLD_UPDATE,
   CAP_TOOL_EXECUTE,
   CAP_INTENT,
   CAP_SIGNAL,
@@ -26,7 +26,6 @@ export type {
   SkillMeta,
   ToolHandler,
   AcceptMessage,
-  WorldUpdatePayload,
   ToolResponsePayload,
   WorldEnrichmentPayload,
   IntentPayload,
@@ -44,7 +43,6 @@ export type {
   FsProbeResponse,
   EndpointUpdateParams,
   EndpointStorage,
-  HealthStatus,
   Point2D,
   EntityPayload,
 } from "./types.js";
@@ -64,8 +62,34 @@ export {
 export {
   hasValidConfig,
   backoffDelayMs,
+  loadConnectionConfig,
+  promptTCPPort,
 } from "./connection-util.js";
-export type { AiloConnectionConfig } from "./connection-util.js";
+export type { AiloConnectionConfig, PromptTCPPortOptions } from "./connection-util.js";
 
 export { startEndpointConfigServer } from "./endpoint-config.js";
 export type { ConfigField, EndpointConfigServerOptions } from "./endpoint-config.js";
+
+export { EndpointError, isEndpointError, toEndpointError } from "./errors.js";
+export type { ErrorCode, ErrorCategory } from "./errors.js";
+
+export { ConsoleLogger, NoopLogger, createComponentLogger, LogLevelValue } from "./logger.js";
+export type { Logger, LogLevel, LogData } from "./logger.js";
+
+export { ConnectionFSM } from "./connection-state.js";
+export type { ConnectionState, StateTransition, StateChangeListener } from "./connection-state.js";
+
+export { BlobClient, deriveHttpBase } from "./blob-client.js";
+export type { BlobUploadResult, BlobClientOptions } from "./blob-client.js";
+
+export { autoUploadMedia, resolveFileArgsInPlace, resolveToLocal } from "./media-middleware.js";
+
+export { normalizeToolResult } from "./tool-dispatch.js";
+
+export {
+  isRecord,
+  isContentParts,
+  stringifyValue,
+  toContentPart,
+  toContentParts,
+} from "./content-parts.js";

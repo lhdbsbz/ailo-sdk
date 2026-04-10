@@ -1,12 +1,6 @@
 import WebSocket from "ws";
-import fs from "fs";
-import os from "os";
-import path from "path";
-import crypto from "crypto";
 import type {
   AcceptMessage,
-  ContentPart,
-  WorldUpdatePayload,
   ToolResponsePayload,
   WorldEnrichmentPayload,
   IntentPayload,
@@ -14,91 +8,44 @@ import type {
   StreamPayload,
   ToolCapability,
   SkillMeta,
-  HealthStatus,
-  EndpointStorage,
   EndpointUpdateParams,
-  FileFetchRequest,
-  DirListRequest,
-  FilePushRequest,
   FsProbeMarker,
-  FsProbeRequest,
 } from "./types.js";
+import { EndpointError } from "./errors.js";
+import type { Logger } from "./logger.js";
+import { ConsoleLogger } from "./logger.js";
+import { ConnectionFSM, type ConnectionState, type StateChangeListener } from "./connection-state.js";
+import { writeFsProbeFile, unlinkFsProbeFile } from "./endpoint-client-fs.js";
+import { dispatchEndpointEvent, type WsFrame } from "./endpoint-client-events.js";
 
 const SDK_VERSION = "1.0.0";
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-
-function resolveBlueprintPath(blueprint: string): string {
-  if (!blueprint) return "";
-  if (blueprint.startsWith("http://") || blueprint.startsWith("https://") || blueprint.startsWith("file://")) {
-    return blueprint;
-  }
-  if (!path.isAbsolute(blueprint)) {
-    console.warn(
-      `[endpoint] Blueprint path "${blueprint}" is relative — this may break if the working directory changes. ` +
-      `Use an absolute path (e.g. via import.meta.url) instead.`,
-    );
-  }
-  return path.resolve(blueprint);
+export interface EndpointClientOptions {
+  handshakeTimeout?: number;
+  heartbeatInterval?: number;
+  heartbeatTimeout?: number;
+  reconnectBaseDelay?: number;
+  reconnectMaxDelay?: number;
+  offlineBufferSize?: number;
+  logger?: Logger;
 }
 
-function isContentParts(value: unknown): value is ContentPart[] {
-  return Array.isArray(value) && value.every(
-    (part) => typeof part === "object" && part !== null && "type" in part,
-  );
-}
-
-function stringifyToolResult(result: unknown): string {
-  if (typeof result === "string") return result;
-  try {
-    const json = JSON.stringify(result);
-    if (json !== undefined) return json;
-  } catch {}
-  return String(result);
-}
-
-function toToolResponseContent(result: unknown): ContentPart[] | undefined {
-  if (result === undefined) return undefined;
-  if (isContentParts(result)) return result;
-  return [{ type: "text", text: stringifyToolResult(result) }];
-}
-
-function jsonTextContent(value: unknown): ContentPart[] {
-  const text = JSON.stringify(value);
-  if (text === undefined) {
-    throw new Error("structured payload must be JSON-serializable");
-  }
-  return [{ type: "text", text }];
-}
-
-const HANDSHAKE_TIMEOUT_MS = 30_000;
-const HEARTBEAT_INTERVAL_MS = 30_000;
-const HEARTBEAT_TIMEOUT_MS = 10_000;
-const RECONNECT_BASE_MS = 1_000;
-const RECONNECT_MAX_MS = 60_000;
-const OFFLINE_BUFFER_MAX = 200;
-
-/** Cooldown before reconnecting after config change, to avoid thrashing */
-export const RECONNECT_COOLDOWN_MS = 1000;
-
-// ─── Internal frame types ─────────────────────────────────────────────────────
-
-type Frame = {
-  type: string;
-  id?: string;
-  ok?: boolean;
-  payload?: unknown;
-  error?: { code: string; message: string };
-  event?: string;
-  seq?: number;
+const DEFAULT_OPTIONS: Required<Omit<EndpointClientOptions, 'logger'>> & { logger: Logger } = {
+  handshakeTimeout: 30_000,
+  heartbeatInterval: 30_000,
+  heartbeatTimeout: 10_000,
+  reconnectBaseDelay: 1_000,
+  reconnectMaxDelay: 60_000,
+  offlineBufferSize: 200,
+  logger: new ConsoleLogger('[endpoint]'),
 };
+
+export const RECONNECT_COOLDOWN_MS = 1000;
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
 };
-
-// ─── Callback types ───────────────────────────────────────────────────────────
 
 export type ToolRequestHandler = (payload: ToolRequestPayload) => Promise<unknown>;
 export type IntentHandler = (payload: IntentPayload) => void;
@@ -107,63 +54,33 @@ export type StreamHandler = (payload: StreamPayload) => void;
 export type SignalHandler = (signal: string, data: unknown) => void;
 export type EvictedHandler = () => void;
 
-
-// ─── Config ───────────────────────────────────────────────────────────────────
-
 export interface EndpointClientConfig {
-  /** WebSocket URL of the Ailo server, e.g. "wss://your-server.com/ws" */
   url: string;
-  /** Pre-created API key from the Ailo admin dashboard */
   apiKey: string;
-  /** Unique identifier for this endpoint, e.g. "robot-01" */
   endpointId: string;
-  /** Capability list — determines which messages this endpoint sends/receives */
   caps: string[];
-  /**
-   * Tools this endpoint can execute.
-   * Declared at connect time so the server knows which tool_request names to route here.
-   * Only relevant when "tool_execute" is in caps.
-   */
   tools?: ToolCapability[];
-  /** Optional instructions describing this endpoint's environment or constraints */
+  mcpTools?: ToolCapability[];
   instructions?: string;
-  /** Blueprint IDs to activate for this endpoint session */
-  blueprints?: string[];
-  /** Skills loaded from local SKILL.md files, reported to the server at connect time */
   skills?: SkillMeta[];
-  /** Max messages to buffer while disconnected (default: 200, 0 = disabled) */
   offlineBufferSize?: number;
 }
 
-/** Connection-only fields for hot-reloading config (passed as second arg to reconnect) */
 export type ConnectionOverrides = Partial<
   Pick<EndpointClientConfig, "url" | "apiKey" | "endpointId">
 >;
 
-// ─── EndpointClient ───────────────────────────────────────────────────────────
-
-/**
- * Connects any external endpoint (robot, Lark, camera, IoT, …) to an Ailo server
- * using the unified Endpoint Protocol with API-key authentication.
- *
- * @example
- * ```ts
- * const client = new EndpointClient({ url, apiKey, endpointId, caps: ["message", "tool_execute"] });
- * client.onToolRequest(async (req) => { ... return result; });
- * await client.connect();
- * await client.accept({ content: [{ type: "text", text: "Hello" }], contextTags: [] });
- * ```
- */
-export class EndpointClient implements EndpointStorage {
+export class EndpointClient {
   private ws: WebSocket | null = null;
   private cfg: EndpointClientConfig;
+  private opts: Required<Omit<EndpointClientOptions, 'logger'>> & { logger: Logger };
+  private fsm: ConnectionFSM;
   private reqId = 0;
   private pending = new Map<string, PendingRequest>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
-  private intentionalClose = false;
   private offlineBuffer: AcceptMessage[] = [];
   private readonly offlineBufferMax: number;
 
@@ -176,21 +93,58 @@ export class EndpointClient implements EndpointStorage {
   private fsProbeMarker: FsProbeMarker | null = null;
   private reconnectWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
-  constructor(config: EndpointClientConfig) {
+  constructor(config: EndpointClientConfig, options?: EndpointClientOptions) {
     this.cfg = config;
-    this.offlineBufferMax = config.offlineBufferSize ?? OFFLINE_BUFFER_MAX;
-    this.fsProbeMarker = this.writeFsProbeFile();
+    this.opts = {
+      handshakeTimeout: options?.handshakeTimeout ?? DEFAULT_OPTIONS.handshakeTimeout,
+      heartbeatInterval: options?.heartbeatInterval ?? DEFAULT_OPTIONS.heartbeatInterval,
+      heartbeatTimeout: options?.heartbeatTimeout ?? DEFAULT_OPTIONS.heartbeatTimeout,
+      reconnectBaseDelay: options?.reconnectBaseDelay ?? DEFAULT_OPTIONS.reconnectBaseDelay,
+      reconnectMaxDelay: options?.reconnectMaxDelay ?? DEFAULT_OPTIONS.reconnectMaxDelay,
+      offlineBufferSize: options?.offlineBufferSize ?? DEFAULT_OPTIONS.offlineBufferSize,
+      logger: options?.logger ?? DEFAULT_OPTIONS.logger,
+    };
+    this.offlineBufferMax = config.offlineBufferSize ?? this.opts.offlineBufferSize;
+    this.fsm = new ConnectionFSM();
+    this.fsProbeMarker = writeFsProbeFile(this.cfg.endpointId, this.opts.logger);
+
+    this.fsm.onStateChange((transition) => {
+      this.opts.logger.debug('state_change', {
+        from: transition.from,
+        to: transition.to,
+        reason: transition.reason,
+      });
+    });
   }
 
-  // ─── Lifecycle ──────────────────────────────────────────────────────────────
+  get state(): ConnectionState {
+    return this.fsm.state;
+  }
+
+  get isConnected(): boolean {
+    return this.fsm.isConnected;
+  }
+
+  onStateChange(listener: StateChangeListener): () => void {
+    return this.fsm.onStateChange(listener);
+  }
+
+  setLogger(logger: Logger): void {
+    this.opts.logger = logger;
+  }
 
   async connect(): Promise<void> {
-    this.intentionalClose = false;
+    if (!this.fsm.canTransitionTo('connecting')) {
+      throw EndpointError.notConnected();
+    }
+    this.fsm.transition('connecting', 'user initiated');
     await this.dial();
   }
 
   close(): void {
-    this.intentionalClose = true;
+    if (this.fsm.state === 'disconnected') return;
+    
+    this.fsm.transition('closing', 'user close');
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.stopHeartbeat();
     this.rejectAllPending(new Error("client closed"));
@@ -198,34 +152,29 @@ export class EndpointClient implements EndpointStorage {
     this.offlineBuffer.length = 0;
     if (this.ws) { this.ws.close(); this.ws = null; }
     if (this.fsProbeMarker) {
-      try { fs.unlinkSync(this.fsProbeMarker.path); } catch {}
+      unlinkFsProbeFile(this.fsProbeMarker.path);
       this.fsProbeMarker = null;
     }
+    this.fsm.forceTransition('disconnected', 'close complete');
   }
 
-  /**
-   * Reconnect with optional updated skills, tools, blueprints, and/or connection config.
-   * - skills: so the server gets the latest enabled skills without restarting.
-   * - tools: update the private tools set for the next connect handshake.
-   * - blueprints: update the blueprint URLs for the next connect handshake.
-   * - connectionOverrides: url/apiKey/endpointId — disconnect, wait ~1s, then connect with new config.
-   */
   async reconnect(
     skills?: SkillMeta[],
     connectionOverrides?: ConnectionOverrides,
     tools?: ToolCapability[],
-    blueprints?: string[],
+    mcpTools?: ToolCapability[],
   ): Promise<void> {
     if (skills !== undefined) this.cfg = { ...this.cfg, skills };
     if (tools !== undefined) this.cfg = { ...this.cfg, tools };
-    if (blueprints !== undefined) this.cfg = { ...this.cfg, blueprints };
+    if (mcpTools !== undefined) this.cfg = { ...this.cfg, mcpTools };
     if (connectionOverrides) {
       const { url, apiKey, endpointId } = connectionOverrides;
       if (url !== undefined) this.cfg = { ...this.cfg, url };
       if (apiKey !== undefined) this.cfg = { ...this.cfg, apiKey };
       if (endpointId !== undefined) this.cfg = { ...this.cfg, endpointId };
     }
-    this.intentionalClose = true;
+    
+    this.fsm.forceTransition('closing', 'reconnect initiated');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -236,52 +185,39 @@ export class EndpointClient implements EndpointStorage {
       this.ws.close();
       this.ws = null;
     }
-    this.intentionalClose = false;
+    this.fsm.forceTransition('disconnected', 'reconnect cleanup');
     this.reconnectAttempt = 0;
+    
     if (connectionOverrides) {
       await new Promise((r) => setTimeout(r, RECONNECT_COOLDOWN_MS));
     }
     await this.connect();
   }
 
-  /**
-   * Incrementally update capabilities after connection — register new or unregister existing
-   * tools, blueprints, skills, caps, or instructions without reconnecting.
-   */
   async update(params: EndpointUpdateParams): Promise<void> {
     await this.request("endpoint.update", params);
   }
 
-  // ─── Callback registration ──────────────────────────────────────────────────
-
-  /** Register a handler for incoming tool_request frames. The return value becomes tool_response.content. */
   onToolRequest(handler: ToolRequestHandler): this {
     this.toolRequestHandler = handler;
     return this;
   }
 
-  /** Register a handler for incoming intent frames. */
   onIntent(handler: IntentHandler): this {
     this.intentHandler = handler;
     return this;
   }
 
-  /** Register a handler for incoming world_enrichment frames. */
   onWorldEnrichment(handler: WorldEnrichmentHandler): this {
     this.worldEnrichmentHandler = handler;
     return this;
   }
 
-  /**
-   * Register a handler for streamed text output.
-   * Called three times per stream: action="start", then one or more "chunk", then "end".
-   */
   onStream(handler: StreamHandler): this {
     this.streamHandler = handler;
     return this;
   }
 
-  /** Register a handler for incoming signal frames. */
   onSignal(signal: string, handler: SignalHandler): this {
     const list = this.signalHandlers.get(signal) ?? [];
     list.push(handler);
@@ -289,87 +225,38 @@ export class EndpointClient implements EndpointStorage {
     return this;
   }
 
-  /**
-   * Register a handler called when this endpoint is evicted by a newer instance
-   * connecting with the same endpointId. The process should exit in this handler.
-   */
   onEvicted(handler: EvictedHandler): this {
     this.evictedHandler = handler;
     return this;
   }
 
-  // ─── Outbound methods ────────────────────────────────────────────────────────
-
-  /** Send a conversational message (requires cap: "message"). */
   async accept(msg: AcceptMessage): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      if (this.intentionalClose || this.offlineBufferMax <= 0) throw new Error("not connected");
-      if (this.offlineBuffer.length >= this.offlineBufferMax)
+    if (!this.fsm.isConnected) {
+      if (this.fsm.state === 'closing' || this.fsm.state === 'disconnected' || this.offlineBufferMax <= 0) {
+        throw EndpointError.notConnected();
+      }
+      if (this.offlineBuffer.length >= this.offlineBufferMax) {
         throw new Error(`offline buffer full (${this.offlineBufferMax})`);
+      }
       this.offlineBuffer.push(msg);
       return;
     }
     await this.acceptDirect(msg);
   }
 
-  /** Send a world_update frame (requires cap: "world_update"). Carries sensor/perception data. */
-  async worldUpdate(payload: WorldUpdatePayload): Promise<void> {
-    await this.request("world_update", payload as unknown as Record<string, unknown>);
-  }
-
-  /** Send a tool_response frame. Call this after receiving and executing a tool_request.
-   *  If the connection is down but a reconnect is in progress, waits for reconnection before sending. */
   async toolResponse(payload: ToolResponsePayload): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      if (!this.intentionalClose) {
+    if (!this.fsm.isConnected) {
+      if (this.fsm.state !== 'closing' && this.fsm.state !== 'disconnected') {
         await this.waitForConnection();
       }
     }
     await this.request("tool_response", payload as unknown as Record<string, unknown>);
   }
 
-  /** Report the platform/hardware health status. */
-  reportHealth(status: HealthStatus, detail?: string): void {
-    const params: Record<string, unknown> = { status };
-    if (detail) params.detail = detail;
-    this.request("endpoint.health", params).catch(() => {});
-  }
-
-  /** Forward a log entry to the server (useful when local stdout is occupied by MCP stdio). */
-  sendLog(
-    level: "debug" | "info" | "warn" | "error",
-    message: string,
-    data?: Record<string, unknown>,
-  ): void {
-    const params: Record<string, unknown> = { level, message };
-    if (data && Object.keys(data).length > 0) params.data = data;
-    this.request("endpoint.log", params).catch(() => {});
-  }
-
-  /** Send a signal frame. */
   sendSignal(signal: string, data?: unknown): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ type: "signal", id: signal, payload: data }));
   }
-
-  // ─── EndpointStorage ──────────────────────────────────────────────────────
-
-  async getData(key: string): Promise<string | null> {
-    const res = await this.request<{ found: boolean; value?: string }>(
-      "endpoint.data.get", { key },
-    );
-    return res.found ? (res.value ?? null) : null;
-  }
-
-  async setData(key: string, value: string): Promise<void> {
-    await this.request("endpoint.data.set", { key, value });
-  }
-
-  async deleteData(key: string): Promise<void> {
-    await this.request("endpoint.data.delete", { key });
-  }
-
-  // ─── Internal: dial + handshake ─────────────────────────────────────────────
 
   private dial(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -378,7 +265,13 @@ export class EndpointClient implements EndpointStorage {
       const settle = (ok: boolean, err?: unknown) => {
         if (settled) return;
         settled = true;
-        ok ? resolve() : reject(err);
+        if (ok) {
+          this.fsm.transition('connected', 'handshake complete');
+          resolve();
+        } else {
+          this.fsm.transition('disconnected', 'dial failed');
+          reject(err);
+        }
       };
 
       ws.on("open", async () => {
@@ -397,8 +290,11 @@ export class EndpointClient implements EndpointStorage {
         }
       });
 
-      ws.on("error", (err) => settle(false, err));
-      ws.on("close", () => settle(false, new Error("closed before handshake")));
+      ws.on("error", (err) => {
+        this.opts.logger.error('ws_error', { error: err.message });
+        settle(false, EndpointError.network('WebSocket error', err));
+      });
+      ws.on("close", () => settle(false, EndpointError.network("closed before handshake")));
     });
   }
 
@@ -407,17 +303,26 @@ export class EndpointClient implements EndpointStorage {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         ws.off("message", handler);
-        reject(new Error("handshake timeout"));
-      }, HANDSHAKE_TIMEOUT_MS);
+        this.opts.logger.warn('handshake_timeout', { timeout: this.opts.handshakeTimeout });
+        reject(EndpointError.timeout("handshake timeout"));
+      }, this.opts.handshakeTimeout);
 
       const handler = (raw: WebSocket.RawData) => {
-        const frame = JSON.parse(raw.toString("utf-8")) as Frame;
+        const frame = JSON.parse(raw.toString("utf-8")) as WsFrame;
         if (frame.type === "res" && frame.id === id) {
           clearTimeout(timer);
           ws.off("message", handler);
-          frame.ok
-            ? resolve()
-            : reject(new Error(frame.error?.message ?? "connect rejected"));
+          if (frame.ok) {
+            resolve();
+          } else {
+            const errMsg = frame.error?.message ?? "connect rejected";
+            this.opts.logger.error('handshake_failed', { error: errMsg });
+            if (frame.error?.code === 'AUTH_FAILED') {
+              reject(EndpointError.auth(errMsg));
+            } else {
+              reject(EndpointError.handshakeFailed(errMsg));
+            }
+          }
         }
       };
       ws.on("message", handler);
@@ -430,22 +335,17 @@ export class EndpointClient implements EndpointStorage {
       };
       if (this.cfg.instructions) connectParams.instructions = this.cfg.instructions;
       if (this.cfg.tools && this.cfg.tools.length > 0) connectParams.tools = this.cfg.tools;
-      if (this.cfg.blueprints && this.cfg.blueprints.length > 0) {
-        connectParams.blueprints = this.cfg.blueprints.map(resolveBlueprintPath);
-      }
+      if (this.cfg.mcpTools && this.cfg.mcpTools.length > 0) connectParams.mcpTools = this.cfg.mcpTools;
       if (this.cfg.skills && this.cfg.skills.length > 0) connectParams.skills = this.cfg.skills;
       if (this.fsProbeMarker) connectParams.fsProbe = this.fsProbeMarker;
       ws.send(JSON.stringify({ type: "req", id, method: "connect", params: connectParams }));
     });
   }
 
-  // ─── Internal: message handling ──────────────────────────────────────────────
-
   private attachHandlers(ws: WebSocket): void {
     ws.on("message", (raw: WebSocket.RawData) => {
-      const frame = JSON.parse(raw.toString("utf-8")) as Frame;
+      const frame = JSON.parse(raw.toString("utf-8")) as WsFrame;
 
-      // res: correlate with pending requests
       if (frame.type === "res" && frame.id) {
         const req = this.pending.get(frame.id);
         if (!req) return;
@@ -456,13 +356,18 @@ export class EndpointClient implements EndpointStorage {
         return;
       }
 
-      // event: server-pushed frames
       if (frame.type === "event") {
-        this.handleEvent(frame);
+        dispatchEndpointEvent(frame, {
+          toolRequestHandler: this.toolRequestHandler,
+          intentHandler: this.intentHandler,
+          worldEnrichmentHandler: this.worldEnrichmentHandler,
+          streamHandler: this.streamHandler,
+          sendToolResponse: (p) => this.toolResponse(p),
+          logger: this.opts.logger,
+        });
         return;
       }
 
-      // signal: bidirectional control messages
       if (frame.type === "signal" && frame.id) {
         const handlers = this.signalHandlers.get(frame.id);
         if (handlers) {
@@ -473,17 +378,16 @@ export class EndpointClient implements EndpointStorage {
     });
 
     ws.on("close", (code, reason) => {
-      const isEvicted =
-        code === 1001 && reason?.toString("utf-8").includes("replaced");
+      const isEvicted = code === 1001 && reason?.toString("utf-8").includes("replaced");
 
       if (isEvicted) {
-        this.intentionalClose = true;
-        this.rejectReconnectWaiters(new Error("evicted"));
+        this.opts.logger.warn('evicted', { code, reason: reason.toString() });
+        this.fsm.forceTransition('disconnected', 'evicted');
+        this.rejectReconnectWaiters(EndpointError.evicted());
         this.evictedHandler?.();
         return;
       }
 
-      // Ignore close events from stale connections (rare race condition).
       if (ws !== this.ws) return;
 
       this.onDisconnect();
@@ -493,81 +397,10 @@ export class EndpointClient implements EndpointStorage {
     });
   }
 
-  private handleEvent(frame: Frame): void {
-    switch (frame.event) {
-      case "tool_request": {
-        const payload = frame.payload as ToolRequestPayload;
-        if (!this.toolRequestHandler || !payload?.id) return;
-        void this.toolRequestHandler(payload)
-          .then((result) => {
-            return this.toolResponse({
-              id: payload.id,
-              success: true,
-              content: toToolResponseContent(result),
-            });
-          })
-          .catch((err: Error) =>
-            this.toolResponse({ id: payload.id, success: false, error: err.message }),
-          )
-          .catch((sendErr: Error) => {
-            console.error(`[endpoint-client] failed to send tool_response for ${payload.id}: ${sendErr.message}`);
-          });
-        break;
-      }
-      case "intent": {
-        const payload = frame.payload as IntentPayload;
-        this.intentHandler?.(payload);
-        break;
-      }
-      case "world_enrichment": {
-        const payload = frame.payload as WorldEnrichmentPayload;
-        this.worldEnrichmentHandler?.(payload);
-        break;
-      }
-      case "stream": {
-        const payload = frame.payload as StreamPayload;
-        this.streamHandler?.(payload);
-        break;
-      }
-      case "file_fetch": {
-        const reqId = frame.id;
-        if (!reqId) break;
-        const payload = frame.payload as FileFetchRequest;
-        void this.handleFileFetch(reqId, payload);
-        break;
-      }
-      case "dir_list": {
-        const reqId = frame.id;
-        if (!reqId) break;
-        const payload = frame.payload as DirListRequest;
-        void this.handleDirList(reqId, payload);
-        break;
-      }
-      case "file_push": {
-        const reqId = frame.id;
-        if (!reqId) break;
-        const payload = frame.payload as FilePushRequest;
-        void this.handleFilePush(reqId, payload);
-        break;
-      }
-      case "fs_probe": {
-        const reqId = frame.id;
-        if (!reqId) break;
-        const payload = frame.payload as FsProbeRequest;
-        void this.handleFsProbe(reqId, payload);
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  // ─── Internal: request / heartbeat / reconnect ───────────────────────────────
-
   private request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error("not connected"));
+        reject(EndpointError.notConnected());
         return;
       }
       const id = `${method}-${++this.reqId}`;
@@ -581,16 +414,16 @@ export class EndpointClient implements EndpointStorage {
       content: msg.content,
       contextTags: msg.contextTags,
     };
-    if (msg.requiresResponse !== undefined) params.requiresResponse = msg.requiresResponse;
     await this.request("endpoint.accept", params);
   }
 
   private flushOfflineBuffer(): void {
     if (this.offlineBuffer.length === 0) return;
     const buffered = this.offlineBuffer.splice(0);
+    this.opts.logger.info('flushing_offline_buffer', { count: buffered.length });
     for (const msg of buffered) {
       this.acceptDirect(msg).catch((err) =>
-        console.error(`[endpoint-client] replay failed: ${(err as Error).message}`),
+        this.opts.logger.error('replay_failed', { error: err.message }),
       );
     }
   }
@@ -601,10 +434,10 @@ export class EndpointClient implements EndpointStorage {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       this.ws.ping();
       this.pongTimer = setTimeout(() => {
-        console.error("[endpoint-client] pong timeout, closing");
+        this.opts.logger.error('pong_timeout', { timeout: this.opts.heartbeatTimeout });
         this.ws?.terminate();
-      }, HEARTBEAT_TIMEOUT_MS);
-    }, HEARTBEAT_INTERVAL_MS);
+      }, this.opts.heartbeatTimeout);
+    }, this.opts.heartbeatInterval);
   }
 
   private stopHeartbeat(): void {
@@ -613,8 +446,10 @@ export class EndpointClient implements EndpointStorage {
   }
 
   private waitForConnection(): Promise<void> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
-    if (this.intentionalClose) return Promise.reject(new Error("not connected"));
+    if (this.fsm.isConnected) return Promise.resolve();
+    if (this.fsm.state === 'closing' || this.fsm.state === 'disconnected') {
+      return Promise.reject(EndpointError.notConnected());
+    }
     return new Promise((resolve, reject) => {
       this.reconnectWaiters.push({ resolve, reject });
     });
@@ -634,7 +469,11 @@ export class EndpointClient implements EndpointStorage {
     this.ws = null;
     this.stopHeartbeat();
     this.rejectAllPending(new Error("disconnected"));
-    if (!this.intentionalClose) this.scheduleReconnect();
+    
+    if (this.fsm.state !== 'closing' && this.fsm.state !== 'disconnected') {
+      this.fsm.transition('reconnecting', 'unexpected disconnect');
+      this.scheduleReconnect();
+    }
   }
 
   private rejectAllPending(err: Error): void {
@@ -644,163 +483,17 @@ export class EndpointClient implements EndpointStorage {
     this.pending.clear();
   }
 
-  private async handleFileFetch(reqId: string, payload: FileFetchRequest): Promise<void> {
-    try {
-      const localPath = payload.path;
-      if (!path.isAbsolute(localPath)) {
-        await this.toolResponse({ id: reqId, success: false, error: `path must be absolute, got: "${localPath}"` });
-        return;
-      }
-      if (!fs.existsSync(localPath)) {
-        await this.toolResponse({ id: reqId, success: false, error: `file not found: ${localPath}` });
-        return;
-      }
-      const fileBuffer = fs.readFileSync(localPath);
-      const fileName = path.basename(localPath);
-
-      const form = new FormData();
-      form.append("file", new Blob([fileBuffer]), fileName);
-
-      const res = await fetch(payload.upload_url, {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok) {
-        await this.toolResponse({ id: reqId, success: false, error: `upload failed: ${res.status}` });
-        return;
-      }
-      const result = await res.json() as Record<string, unknown>;
-      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent(result) });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[endpoint] file_fetch error:", msg);
-      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
-    }
-  }
-
-  private async handleDirList(reqId: string, payload: DirListRequest): Promise<void> {
-    try {
-      const dirPath = payload.path;
-      if (!path.isAbsolute(dirPath)) {
-        await this.toolResponse({ id: reqId, success: false, error: `path must be absolute, got: "${dirPath}"` });
-        return;
-      }
-      if (!fs.existsSync(dirPath)) {
-        await this.toolResponse({ id: reqId, success: false, error: `directory not found: ${dirPath}` });
-        return;
-      }
-      const stat = fs.statSync(dirPath);
-      if (!stat.isDirectory()) {
-        await this.toolResponse({ id: reqId, success: false, error: `not a directory: ${dirPath}` });
-        return;
-      }
-      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-      const result = {
-        entries: entries
-          .filter((e) => e.isFile() || e.isDirectory())
-          .map((e) => {
-            const fullPath = path.join(dirPath, e.name);
-            try {
-              const s = fs.statSync(fullPath);
-              return {
-                name: e.name,
-                type: e.isDirectory() ? "dir" : "file",
-                size: s.size,
-                mtime: s.mtime.toISOString(),
-              };
-            } catch {
-              return { name: e.name, type: e.isDirectory() ? "dir" : "file", size: 0 };
-            }
-          }),
-      };
-      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent(result) });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[endpoint] dir_list error:", msg);
-      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
-    }
-  }
-
-  private async handleFilePush(reqId: string, payload: FilePushRequest): Promise<void> {
-    try {
-      const targetPath = payload.target_path;
-      if (!path.isAbsolute(targetPath)) {
-        await this.toolResponse({ id: reqId, success: false, error: `target_path must be absolute, got: "${targetPath}"` });
-        return;
-      }
-      const dir = path.dirname(targetPath);
-      fs.mkdirSync(dir, { recursive: true });
-
-      if (payload.local_source) {
-        if (!path.isAbsolute(payload.local_source)) {
-          await this.toolResponse({ id: reqId, success: false, error: `local_source must be absolute, got: "${payload.local_source}"` });
-          return;
-        }
-        fs.copyFileSync(payload.local_source, targetPath);
-        const stat = fs.statSync(targetPath);
-        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ size: stat.size }) });
-        return;
-      }
-
-      if (!payload.url) {
-        await this.toolResponse({ id: reqId, success: false, error: "neither url nor local_source provided" });
-        return;
-      }
-      const res = await fetch(payload.url);
-      if (!res.ok) {
-        await this.toolResponse({ id: reqId, success: false, error: `download failed: ${res.status}` });
-        return;
-      }
-      const buffer = Buffer.from(await res.arrayBuffer());
-      fs.writeFileSync(targetPath, buffer);
-      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ size: buffer.length }) });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[endpoint] file_push error:", msg);
-      await this.toolResponse({ id: reqId, success: false, error: msg }).catch(() => {});
-    }
-  }
-
-  private async handleFsProbe(reqId: string, payload: FsProbeRequest): Promise<void> {
-    try {
-      if (!path.isAbsolute(payload.path)) {
-        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) });
-        return;
-      }
-      if (fs.existsSync(payload.path)) {
-        const content = fs.readFileSync(payload.path, "utf-8");
-        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: true, content }) });
-      } else {
-        await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.toolResponse({ id: reqId, success: true, content: jsonTextContent({ found: false, content: "" }) }).catch(() => {});
-      console.error("[endpoint] fs_probe error:", msg);
-    }
-  }
-
-  private writeFsProbeFile(): FsProbeMarker | null {
-    try {
-      const nonce = crypto.randomUUID();
-      const probePath = path.join(os.tmpdir(), `ailo-ep-${this.cfg.endpointId}.probe`);
-      fs.writeFileSync(probePath, nonce, "utf-8");
-      return { path: probePath, nonce };
-    } catch (err) {
-      console.error("[endpoint] failed to write fs probe file:", err);
-      return null;
-    }
-  }
-
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
-    const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, RECONNECT_MAX_MS);
+    const delay = Math.min(this.opts.reconnectBaseDelay * 2 ** this.reconnectAttempt, this.opts.reconnectMaxDelay);
     this.reconnectAttempt++;
-    console.error(`[endpoint-client] reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
+    this.opts.logger.info('scheduling_reconnect', { delay, attempt: this.reconnectAttempt });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.fsm.transition('connecting', 'reconnect attempt');
       this.dial().catch((err) => {
-        console.error(`[endpoint-client] reconnect failed: ${(err as Error).message}`);
+        this.opts.logger.error('reconnect_failed', { error: err.message });
+        this.fsm.transition('reconnecting', 'reconnect failed');
         this.scheduleReconnect();
       });
     }, delay);

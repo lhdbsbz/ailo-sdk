@@ -1,9 +1,0 @@
-fastapi>=0.104.0
-uvicorn>=0.24.0
-python-dotenv>=1.0.0
-
-# ClawWork evaluator import chain pulls in these modules even though
-# we only use the evaluation engine. Install them to avoid ModuleNotFoundError.
-PyPDF2>=3.0.0
-e2b-code-interpreter>=1.0.0
-langchain-core>=0.1.0

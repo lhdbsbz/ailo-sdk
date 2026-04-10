@@ -1,27 +1,14 @@
 #!/usr/bin/env node
 
-import { createInterface } from "readline";
+import { promptTCPPort } from "@greatlhd/ailo-endpoint-sdk";
 import { startWorldDemoServer } from "./server.js";
 import { StateStore } from "./state-store.js";
 import { DeviceHub } from "./device-hub.js";
 
-async function promptPort(): Promise<number> {
-  for (;;) {
-    const port = await new Promise<number | null>((resolve) => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      rl.question("请输入 Ailo World Demo 本地页面端口号: ", (answer) => {
-        rl.close();
-        const value = Number(answer.trim());
-        resolve(!Number.isNaN(value) && value > 0 && value < 65536 ? value : null);
-      });
-    });
-    if (port !== null) return port;
-    console.error("无效端口，请输入 1-65535 之间的数字");
-  }
-}
-
 async function main(): Promise<void> {
-  const port = await promptPort();
+  const port = await promptTCPPort({
+    question: "请输入 Ailo World Demo 本地页面端口号: ",
+  });
   const store = new StateStore();
   const hub = new DeviceHub(store);
   const server = startWorldDemoServer({ port, store, hub });

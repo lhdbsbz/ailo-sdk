@@ -14,6 +14,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import yaml from "js-yaml";
 import type { SkillMeta } from "./types.js";
 
 /**
@@ -96,13 +97,22 @@ function parseSkillMd(raw: string, dirName: string): SkillMeta | null {
       const frontmatter = trimmed.slice(3, endIdx);
       content = trimmed.slice(endIdx + 3).trim();
 
-      for (const line of frontmatter.split("\n")) {
-        const colonIdx = line.indexOf(":");
-        if (colonIdx < 0) continue;
-        const key = line.slice(0, colonIdx).trim().toLowerCase();
-        const val = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, "");
-        if (key === "name" && val) name = val;
-        if (key === "description" && val) description = val;
+      try {
+        const parsed = yaml.load(frontmatter) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") {
+          if (typeof parsed.name === "string" && parsed.name) name = parsed.name;
+          if (typeof parsed.description === "string" && parsed.description) description = parsed.description;
+        }
+      } catch {
+        // Fall back to simple string parsing if yaml fails
+        for (const line of frontmatter.split("\n")) {
+          const colonIdx = line.indexOf(":");
+          if (colonIdx < 0) continue;
+          const key = line.slice(0, colonIdx).trim().toLowerCase();
+          const val = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, "");
+          if (key === "name" && val) name = val;
+          if (key === "description" && val) description = val;
+        }
       }
     } else {
       content = trimmed;

@@ -360,19 +360,6 @@ code {
 .sub-panel { display:none; }
 .sub-panel.active { display:block; }
 
-/* ─── Blueprint viewer ───────────────────────────────────────── */
-.blueprint-tabs { flex-wrap:wrap; }
-.blueprint-content {
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px 18px;
-  font-size: 13px; line-height:1.65;
-  white-space: pre-wrap; overflow: auto;
-  max-height: 60vh; color: var(--text-secondary);
-  font-family:'SF Mono','Fira Code',monospace;
-}
-
 /* ─── Skills ─────────────────────────────────────────────────── */
 .skill-item {
   display: flex; justify-content:space-between; align-items:center;
@@ -403,6 +390,24 @@ code {
   box-shadow: 0 1px 4px rgba(0,0,0,.4);
 }
 .toggle input:checked + .slider::before { transform:translateX(18px); }
+
+/* 微信配置：大号开关 + 醒目横幅 */
+.toggle.toggle-lg {
+  width: 52px;
+  height: 28px;
+}
+.toggle.toggle-lg .slider {
+  border-radius: 14px;
+}
+.toggle.toggle-lg .slider::before {
+  height: 22px;
+  width: 22px;
+  left: 3px;
+  bottom: 3px;
+}
+.toggle.toggle-lg input:checked + .slider::before {
+  transform: translateX(24px);
+}
 
 /* ─── MCP ────────────────────────────────────────────────────── */
 .input-row { display:flex; gap:8px; align-items:center; }
@@ -508,17 +513,6 @@ code {
 @keyframes toastOut { from{opacity:1;transform:translateY(0)} to{opacity:0;transform:translateY(8px)} }
 .toast.hiding { animation:toastOut .2s ease forwards; }
 
-/* ─── Platform channel config (feishu/dingtalk/qq/email) ─────── */
-.channel-header {
-  display:flex; align-items:center; gap:14px; margin-bottom:18px;
-}
-.channel-icon {
-  width:44px; height:44px; border-radius:var(--radius-md); flex-shrink:0;
-  display:flex; align-items:center; justify-content:center; font-size:22px;
-}
-.channel-title { font-size:16px; font-weight:700; }
-.channel-subtitle { font-size:13px; color:var(--text-muted); margin-top:2px; }
-
 /* ─── Webchat embed ──────────────────────────────────────────── */
 .chat-embed {
   width:100%; height:calc(100vh - 40px); min-height:400px;
@@ -536,4 +530,256 @@ code {
   .sidebar-brand { justify-content:center; padding:16px 0; }
   .main-content { padding:16px; }
   .info-grid { grid-template-columns:1fr; }
+}
+
+/* ─── Tools Grid ─────────────────────────────────────────────── */
+.tools-section {
+  margin-bottom: 20px;
+}
+.tools-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tools-section-title .count {
+  background: var(--bg-muted);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.tool-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.tool-name {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.tool-name code {
+  background: var(--bg-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--accent-light);
+}
+.tool-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tools-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ─── Skills Grid ─────────────────────────────────────────────── */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.skill-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.skill-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-light);
+  margin-bottom: 4px;
+}
+.skill-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ─── MCP Servers ──────────────────────────────────────────────── */
+.mcp-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mcp-server-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.mcp-server-item.running {
+  border-color: rgba(80, 214, 141, 0.3);
+}
+.mcp-server-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.mcp-server-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.mcp-server-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.mcp-server-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.mcp-server-status .status-dot.running {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+.mcp-server-status .status-dot.stopped {
+  background: var(--text-muted);
+}
+.mcp-server-conn {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+.mcp-server-conn code {
+  background: var(--bg-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.mcp-server-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mcp-server-tools {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mcp-server-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ─── Status Header ────────────────────────────────────────────── */
+.status-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.status-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.status-icon svg {
+  width: 28px;
+  height: 28px;
+}
+.status-icon.connected {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.status-icon.disconnected {
+  background: var(--bg-muted);
+  color: var(--text-muted);
+}
+.status-info {
+  flex: 1;
+  min-width: 0;
+}
+.status-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+.status-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ─── Status Stats ─────────────────────────────────────────────── */
+.status-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (max-width: 900px) {
+  .status-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.stat-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ─── Connection Status in Sidebar ────────────────────────────── */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.connection-status .status-dot {
+  width: 6px;
+  height: 6px;
+}
+
+/* ─── Tab Count Badge ──────────────────────────────────────────── */
+.tab-count {
+  background: var(--bg-muted);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* ─── Env Grid ────────────────────────────────────────────────── */
+.env-grid {
+  display: flex;
+  flex-direction: column;
+}
+.env-action {
+  flex-shrink: 0;
 }

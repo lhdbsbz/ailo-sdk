@@ -4,7 +4,7 @@ import {
   EndpointClient,
   textPart,
   type ToolRequestPayload,
-} from "@lmcl/ailo-endpoint-sdk";
+} from "@greatlhd/ailo-endpoint-sdk";
 import { DEVICES, SCENARIOS, type DeviceDef, type ScenarioDef } from "./config.js";
 import { StateStore } from "./state-store.js";
 
@@ -154,7 +154,6 @@ export class DeviceHub {
           { kind: "scene", value: device.scene, groupWith: true },
           { kind: "demo", value: scenario.id, groupWith: false },
         ],
-        requiresResponse: true,
       });
       this.store.appendLog({
         level: "up",

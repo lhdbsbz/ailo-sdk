@@ -102,7 +102,7 @@ src/
 | 层 | 技术 |
 |----|------|
 | 后端 | Node.js + TypeScript，原生 HTTP/WS 服务器 |
-| 设备通信 | `@lmcl/ailo-endpoint-sdk`（WebSocket Endpoint 协议） |
+| 设备通信 | `@greatlhd/ailo-endpoint-sdk`（WebSocket Endpoint 协议） |
 | 前端 | 原生 HTML/CSS/JS modules，无构建工具，无框架 |
 | 场景渲染 | CSS Grid + 2.5D 等距透视 + AI 生成场景底图 |
 | 动画 | CSS transitions + keyframes + JS 状态驱动 |
