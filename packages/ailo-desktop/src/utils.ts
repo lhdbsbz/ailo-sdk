@@ -1,4 +1,4 @@
-import type { EndpointContext } from "@greatlhd/ailo-endpoint-sdk";
+import type { BodyContext } from "@greatlhd/ailo-body";
 
 export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -8,7 +8,7 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export function createChannelLogger(
   prefix: string,
-  getCtx: () => EndpointContext | null,
+  getCtx: () => BodyContext | null,
 ): (level: LogLevel, message: string, data?: Record<string, unknown>) => void {
   return (level, message, data) => {
     const ctx = getCtx();

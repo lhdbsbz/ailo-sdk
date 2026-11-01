@@ -4,7 +4,7 @@
  */
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import type { ContentPart } from "@greatlhd/ailo-endpoint-sdk";
+import type { ContentPart } from "@greatlhd/ailo-body";
 import { validateArgs } from "./param_validator.js";
 import { requireAbsPath } from "./path_utils.js";
 import { applyUpdateHunk } from "./apply_patch_update.js";

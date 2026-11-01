@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { ContentPart } from "@greatlhd/ailo-endpoint-sdk";
+import type { ContentPart } from "@greatlhd/ailo-body";
+import { uploadLocalFile } from "./media_bridge.js";
 import { validateArgs } from "./param_validator.js";
 import { requireAbsPath } from "./path_utils.js";
 import { markFileRead, isFileStale, clearFileState } from "./tool_context.js";
@@ -57,18 +58,8 @@ async function readFile(args: Args): Promise<string | ContentPart[]> {
 
   const ext = path.extname(filePath).toLowerCase().slice(1);
   if (IMAGE_EXTENSIONS.has(ext)) {
-    const mime = inferMime(ext);
-    return [
-      {
-        type: "image",
-        media: {
-          type: "image",
-          path: filePath,
-          mime,
-          name: path.basename(filePath),
-        },
-      },
-    ];
+    // 协议里媒体只能是 blob 或 URL：本地图片先上传，再把引用放进结果。
+    return [await uploadLocalFile(filePath)];
   }
 
   const offset = validated.offset! - 1;

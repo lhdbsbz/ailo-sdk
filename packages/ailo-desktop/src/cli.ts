@@ -6,7 +6,7 @@
 import { createInterface } from "readline";
 import { join, resolve } from "path";
 import { mkdirSync } from "fs";
-import { writeConfig } from "@greatlhd/ailo-endpoint-sdk";
+import { writeConfig } from "@greatlhd/ailo-body";
 import { CONFIG_FILENAME } from "./constants.js";
 
 function parseCliArgs(): { useDefaults: boolean; configDir: string } {
@@ -49,21 +49,21 @@ export async function runInit(useDefaultsArg?: boolean, configDirArg?: string): 
 
   const wsUrl = useDefaults ? "ws://127.0.0.1:19800/ws" : await prompt("Ailo WebSocket URL", "ws://127.0.0.1:19800/ws");
   const apiKey = useDefaults ? "" : await prompt("API Key (留空稍后配置)");
-  const endpointId = useDefaults ? "desktop-01" : await prompt("端点 ID", "desktop-01");
+  const bodyId = useDefaults ? "desktop-01" : await prompt("肢体 ID（这台机器叫什么）", "desktop-01");
 
   const config = {
     ailo: {
       wsUrl,
       apiKey: apiKey || "",
-      endpointId,
+      bodyId,
     },
   };
 
   writeConfig(configPath, config);
   console.log(`\n已写入 ${configPath}`);
 
-  console.log("\n初始化完成！运行以下命令启动桌面端点：");
-  console.log(`  ailo-desktop --config-dir ${configDir} --port 3000`);
+  console.log("\n初始化完成！运行以下命令启动这个肢体：");
+  console.log(`  ailo-desktop --config-dir ${configDir}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

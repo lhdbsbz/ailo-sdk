@@ -1,0 +1,29 @@
+{
+  "name": "@greatlhd/ailo-body",
+  "version": "3.0.0",
+  "description": "Ailo 肢体 SDK — 把一台机器、一个设备、一个执行器接成大脑的四肢。零运行时依赖，协议 ailo-body/1。",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["ailo", "body", "sdk", "device", "iot"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

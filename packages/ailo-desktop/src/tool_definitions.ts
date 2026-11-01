@@ -1,11 +1,11 @@
 /**
- * 工具定义集中管理 — 对齐 tools-contract v1.0。
+ * 这个肢体（一台电脑）会哪些动作。
  *
- * 契约内工具：read/write/edit/apply_patch/glob/grep/bash/bash_output/bash_kill/web_fetch/web_search
- * 契约外业务扩展：webchat_send/mcp_manage
+ * 只有动作，没有知识：技能、提示词、MCP 都在大脑那边。动作名只在肢体内有名，
+ * 所以这里不需要前缀、不需要避让别的设备，也不会与谁冲突。
  */
 
-import type { ToolCapability } from "@greatlhd/ailo-endpoint-sdk";
+import type { Action } from "@greatlhd/ailo-body";
 
 export interface ToolDefinition {
   name: string;
@@ -148,26 +148,7 @@ export const BASH_TOOLS: ToolDefinition[] = [
   },
 ];
 
-/** 契约外业务扩展 */
-export const WEBCHAT_SEND_TOOL: ToolDefinition = {
-  name: "webchat_send",
-  description:
-    "通过配置页网页聊天向用户发消息。需已打开 /chat 并保持 WebSocket。participantName 用于匹配目标用户。",
-  params: {
-    type: "object",
-    properties: {
-      text: { type: "string", description: "消息文本" },
-      participantName: { type: "string", description: "用户称呼，须与页面一致且在线" },
-      attachments: {
-        type: "array",
-        items: { type: "object", properties: { path: { type: "string", description: "本地绝对路径" } } },
-      },
-    },
-    required: ["text", "participantName"],
-  },
-};
-
-export function toToolCapabilities(definitions: ToolDefinition[]): ToolCapability[] {
+export function toActions(definitions: ToolDefinition[]): Action[] {
   return definitions.map((def) => ({
     name: def.name,
     description: def.description,

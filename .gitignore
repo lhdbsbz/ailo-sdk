@@ -4,4 +4,4 @@ dist/
 .DS_Store
 .env
 config.json
-/sdks/ailo-endpoint-sdk/.npmrc
+/sdks/ailo-body/.npmrc

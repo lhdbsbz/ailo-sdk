@@ -38,13 +38,21 @@ export function markFileRead(filePath: string, content: string, mtime: Date, off
  * 检查文件是否被外部修改（新鲜度检查）
  * @returns true 表示文件已被外部修改，需要重新读取
  */
+/**
+ * mtimeMs 是浮点（NTFS 100ns / APFS 1ns），Date.getTime() 只有整毫秒，
+ * 直接相等比较会把"刚读过"判成"已修改"。差 1ms 以内视为同一版本。
+ */
+function mtimeChanged(filePath: string, recorded: Date): boolean {
+  const currentMs = fs.statSync(filePath).mtimeMs;
+  return Math.abs(currentMs - recorded.getTime()) >= 1;
+}
+
 export function isFileStale(filePath: string): boolean {
   const state = readFileState.get(filePath);
   if (!state) return true; // 从未读过，视为过期
 
   try {
-    const currentStat = fs.statSync(filePath);
-    return currentStat.mtimeMs !== state.mtime.getTime();
+    return mtimeChanged(filePath, state.mtime);
   } catch {
     return true; // 文件不存在或被删除
   }
@@ -59,8 +67,7 @@ export function getCachedContent(filePath: string): string | null {
   if (!state) return null;
 
   try {
-    const currentStat = fs.statSync(filePath);
-    if (currentStat.mtimeMs !== state.mtime.getTime()) return null;
+    if (mtimeChanged(filePath, state.mtime)) return null;
   } catch {
     return null;
   }

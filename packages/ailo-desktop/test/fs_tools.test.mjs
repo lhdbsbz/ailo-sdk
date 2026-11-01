@@ -85,6 +85,8 @@ test("write creates new file", async () => {
 test("edit replaces string in file", async () => {
   setup();
   fs.writeFileSync(testFile, "Hello World", "utf-8");
+  // edit 有防陈旧写入：必须先在本次上下文里 read 过这个文件。
+  await fsTool("read", { path: testFile });
   await fsTool("edit", {
     path: testFile,
     old_string: "Hello",
