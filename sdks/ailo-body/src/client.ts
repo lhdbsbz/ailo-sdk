@@ -1,3 +1,4 @@
+import { isBodyError } from './errors.js'
 import type { Logger } from './logger.js'
 import { ConsoleLogger } from './logger.js'
 import { BlobStore } from './media.js'
@@ -5,6 +6,7 @@ import {
   PROTOCOL,
   Code,
   CloseCode,
+  ReplyCode,
   Event,
   Method,
   assertValidActions,
@@ -440,7 +442,12 @@ export class BodyClient {
       this.reply(id, { content: toContentParts(result, maxBytes, this.logger) })
     } catch (error) {
       const err = error as Error
-      const code = controller.signal.aborted ? Code.ActionCancelled : Code.ActionFailed
+      // 处理器可以用 BodyError 声明这是参数问题（INVALID_PARAMS）等；没声明就按失败处理。
+      const code = controller.signal.aborted
+        ? Code.ActionCancelled
+        : isBodyError(error) && ReplyCode.has(error.code)
+          ? error.code
+          : Code.ActionFailed
       this.replyError(id, code, err.message || String(error))
     } finally {
       this.inflight.delete(id)

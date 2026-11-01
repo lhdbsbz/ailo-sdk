@@ -67,6 +67,21 @@ export const Code = {
   Internal: 'INTERNAL',
 } as const
 
+/**
+ * 肢体在应答 action.call 时**可以据实返回**的码。
+ *
+ * 默认是 ACTION_FAILED。明确知道是参数问题的肢体应回 INVALID_PARAMS——大脑据此
+ * 决定"改参数再来"还是"这条路走不通"，而不是一律重试。
+ */
+export const ReplyCode: ReadonlySet<string> = new Set([
+  Code.InvalidParams,
+  Code.UnknownAction,
+  Code.ActionFailed,
+  Code.ActionTimeout,
+  Code.ActionCancelled,
+  Code.Internal,
+])
+
 /** 关闭码。一律按数字判定，不匹配 reason 文案。 */
 export const CloseCode = {
   Evicted: 4001,

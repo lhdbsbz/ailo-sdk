@@ -3,6 +3,16 @@
  * 用于验证工具参数的类型和必需性，替代大量的 `as` 类型断言
  */
 
+import { BodyError } from "@greatlhd/ailo-body";
+
+/**
+ * 参数问题用协议里的 INVALID_PARAMS，而不是笼统的 ACTION_FAILED：
+ * 大脑据此知道该改参数重试，而不是换一条路。
+ */
+function invalidParams(message: string): BodyError {
+  return new BodyError(message, "INVALID_PARAMS");
+}
+
 export type ParamType = "string" | "number" | "boolean" | "array" | "object";
 
 export interface ParamSpec {
@@ -30,10 +40,10 @@ export function validateArgs<T>(
   schema: ParamSchema
 ): T {
   if (args === null || args === undefined) {
-    throw new Error("参数不能为空");
+    throw invalidParams("参数不能为空");
   }
   if (typeof args !== "object") {
-    throw new Error(`参数必须是对象，收到: ${typeof args}`);
+    throw invalidParams(`参数必须是对象，收到: ${typeof args}`);
   }
 
   const result: Record<string, unknown> = {};
@@ -44,7 +54,7 @@ export function validateArgs<T>(
 
     // 处理必需参数
     if (spec.required && (value === undefined || value === null)) {
-      throw new Error(`参数 "${key}" 是必需的`);
+      throw invalidParams(`参数 "${key}" 是必需的`);
     }
 
     // 使用默认值
@@ -61,7 +71,7 @@ export function validateArgs<T>(
     // 类型验证
     const actualType = Array.isArray(value) ? "array" : typeof value;
     if (actualType !== spec.type) {
-      throw new Error(
+      throw invalidParams(
         `参数 "${key}" 类型错误: 期望 ${spec.type}, 收到 ${actualType}`
       );
     }
@@ -69,16 +79,16 @@ export function validateArgs<T>(
     // 数值范围验证
     if (spec.type === "number" && typeof value === "number") {
       if (spec.min !== undefined && value < spec.min) {
-        throw new Error(`参数 "${key}" 必须 >= ${spec.min}, 收到 ${value}`);
+        throw invalidParams(`参数 "${key}" 必须 >= ${spec.min}, 收到 ${value}`);
       }
       if (spec.max !== undefined && value > spec.max) {
-        throw new Error(`参数 "${key}" 必须 <= ${spec.max}, 收到 ${value}`);
+        throw invalidParams(`参数 "${key}" 必须 <= ${spec.max}, 收到 ${value}`);
       }
     }
 
     // 自定义验证
     if (spec.validate && !spec.validate(value)) {
-      throw new Error(`参数 "${key}" 验证失败`);
+      throw invalidParams(`参数 "${key}" 验证失败`);
     }
 
     result[key] = value;
@@ -92,10 +102,10 @@ export function validateArgs<T>(
  */
 export function validateString(value: unknown, paramName: string): string {
   if (value === undefined || value === null) {
-    throw new Error(`参数 "${paramName}" 是必需的`);
+    throw invalidParams(`参数 "${paramName}" 是必需的`);
   }
   if (typeof value !== "string") {
-    throw new Error(`参数 "${paramName}" 必须是字符串，收到: ${typeof value}`);
+    throw invalidParams(`参数 "${paramName}" 必须是字符串，收到: ${typeof value}`);
   }
   return value;
 }
@@ -112,16 +122,16 @@ export function validateNumber(
     if (options?.default !== undefined) {
       return options.default;
     }
-    throw new Error(`参数 "${paramName}" 是必需的`);
+    throw invalidParams(`参数 "${paramName}" 是必需的`);
   }
   if (typeof value !== "number") {
-    throw new Error(`参数 "${paramName}" 必须是数字，收到: ${typeof value}`);
+    throw invalidParams(`参数 "${paramName}" 必须是数字，收到: ${typeof value}`);
   }
   if (options?.min !== undefined && value < options.min) {
-    throw new Error(`参数 "${paramName}" 必须 >= ${options.min}, 收到 ${value}`);
+    throw invalidParams(`参数 "${paramName}" 必须 >= ${options.min}, 收到 ${value}`);
   }
   if (options?.max !== undefined && value > options.max) {
-    throw new Error(`参数 "${paramName}" 必须 <= ${options.max}, 收到 ${value}`);
+    throw invalidParams(`参数 "${paramName}" 必须 <= ${options.max}, 收到 ${value}`);
   }
   return value;
 }
@@ -138,10 +148,10 @@ export function validateBoolean(
     if (defaultValue !== undefined) {
       return defaultValue;
     }
-    throw new Error(`参数 "${paramName}" 是必需的`);
+    throw invalidParams(`参数 "${paramName}" 是必需的`);
   }
   if (typeof value !== "boolean") {
-    throw new Error(`参数 "${paramName}" 必须是布尔值，收到: ${typeof value}`);
+    throw invalidParams(`参数 "${paramName}" 必须是布尔值，收到: ${typeof value}`);
   }
   return value;
 }
@@ -155,10 +165,10 @@ export function validateArray<T>(
   itemValidator?: (item: unknown) => T
 ): T[] {
   if (value === undefined || value === null) {
-    throw new Error(`参数 "${paramName}" 是必需的`);
+    throw invalidParams(`参数 "${paramName}" 是必需的`);
   }
   if (!Array.isArray(value)) {
-    throw new Error(`参数 "${paramName}" 必须是数组，收到: ${typeof value}`);
+    throw invalidParams(`参数 "${paramName}" 必须是数组，收到: ${typeof value}`);
   }
   if (itemValidator) {
     return value.map(itemValidator);
@@ -174,10 +184,10 @@ export function validateObject<T extends Record<string, unknown>>(
   paramName: string
 ): T {
   if (value === undefined || value === null) {
-    throw new Error(`参数 "${paramName}" 是必需的`);
+    throw invalidParams(`参数 "${paramName}" 是必需的`);
   }
   if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`参数 "${paramName}" 必须是对象，收到: ${Array.isArray(value) ? "array" : typeof value}`);
+    throw invalidParams(`参数 "${paramName}" 必须是对象，收到: ${Array.isArray(value) ? "array" : typeof value}`);
   }
   return value as T;
 }

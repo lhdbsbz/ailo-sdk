@@ -2,9 +2,12 @@ import { BodyClient, type ActionCall, type ClientConfig, type ClientOptions } fr
 import { BodyError } from './errors.js'
 import { ConsoleLogger, type Logger, type LogData, type LogLevel } from './logger.js'
 import { BlobStore } from './media.js'
-import type { Action, ContentPart, Observation, ObservationSource } from './proto.js'
+import { Code, type Action, type ContentPart, type Observation, type ObservationSource } from './proto.js'
 
-/** 动作处理器：抛异常即 ACTION_FAILED；返回值按 ContentPart[] / string / 其余 JSON 化。 */
+/**
+ * 动作处理器：返回值按 ContentPart[] / string / 其余 JSON 化。
+ * 抛 BodyError 可用它带的协议码（如 INVALID_PARAMS）；抛普通 Error 一律 ACTION_FAILED。
+ */
 export type ActionHandler = (args: Record<string, unknown>, call: ActionCall) => Promise<unknown> | unknown
 
 /** 肢体运行时上下文，交给业务 handler 用。 */
@@ -82,7 +85,8 @@ export function runBody(config: BodyConfig): void {
       const fn = handlers[call.action]
       if (fn) return fn(call.args, call)
       if (config.onUnknownAction) return config.onUnknownAction(call.action, call.args, call)
-      throw new Error(`unknown action: ${call.action}`)
+      // 如实回 UNKNOWN_ACTION：大脑据此知道是名字不对，而不是这条动作失败了。
+      throw new BodyError(`unknown action: ${call.action}`, Code.UnknownAction)
     },
     onEvicted: config.onEvicted,
     onStateChange: (state, detail) => logger.info('state', { state, detail }),
