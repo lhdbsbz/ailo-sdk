@@ -19,25 +19,3 @@ export function writeConfig<T = Record<string, unknown>>(configPath: string, dat
   renameSync(tmp, configPath);
 }
 
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  const parts = path.split(".");
-  let cur: unknown = obj;
-  for (const p of parts) {
-    if (cur == null || typeof cur !== "object") return undefined;
-    cur = (cur as Record<string, unknown>)[p];
-  }
-  return cur;
-}
-
-function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
-  const parts = path.split(".");
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const p = parts[i];
-    if (cur[p] == null || typeof cur[p] !== "object") cur[p] = {};
-    cur = cur[p] as Record<string, unknown>;
-  }
-  cur[parts[parts.length - 1]] = value;
-}
-
-export { getNestedValue, setNestedValue };

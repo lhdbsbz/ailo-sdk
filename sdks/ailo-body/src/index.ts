@@ -12,16 +12,11 @@ export { runBody, SDK_VERSION, type BodyConfig, type BodyContext, type BodyHandl
 
 export { BlobStore, inferMime, type BlobRef } from './media.js'
 
-export { BodyError, isBodyError, type LocalCode } from './errors.js'
+export { BodyError, isBodyError } from './errors.js'
 
 export { ConsoleLogger, NoopLogger, createComponentLogger, type Logger, type LogData, type LogLevel } from './logger.js'
 
-export {
-  readConfig,
-  writeConfig,
-  getNestedValue,
-  setNestedValue,
-} from './config-io.js'
+export { readConfig, writeConfig } from './config-io.js'
 
 export {
   hasValidConfig,

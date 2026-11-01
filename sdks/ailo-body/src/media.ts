@@ -8,8 +8,8 @@ import type { ContentPart, HttpInfo } from './proto.js'
 import { blobPart } from './proto.js'
 
 /**
- * 上传结果。id 只在「上传用的那把端点密钥」的命名空间里有意义：
- * 协议没有跨端点传递 Blob 这回事，服务端也不做去重。
+ * 上传结果。id 只在「上传用的那把肢体密钥」的命名空间里有意义：
+ * 协议没有跨肢体传递 Blob 这回事，服务端也不做去重。
  */
 export interface BlobRef {
   id: string

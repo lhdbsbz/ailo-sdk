@@ -4,13 +4,6 @@
  * code 优先取协议错误码（见 proto.Code），本地失败用 CLIENT_* 前缀，
  * 便于调用方按码分流而不是匹配文案。
  */
-export type LocalCode =
-  | 'CLIENT_NOT_CONNECTED'
-  | 'CLIENT_TIMEOUT'
-  | 'CLIENT_EVICTED'
-  | 'CLIENT_CONFIG'
-  | 'CLIENT_HANDSHAKE'
-
 export class BodyError extends Error {
   constructor(
     message: string,

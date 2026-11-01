@@ -1,6 +1,6 @@
 /**
  * apply_patch：OpenClaw 风格 *** Begin Patch / *** End Patch 格式。
- * 逻辑改编自 openclaw/src/agents/apply-patch.ts，端点侧无 sandbox 桥接。
+ * 逻辑改编自 openclaw/src/agents/apply-patch.ts，肢体侧无 sandbox 桥接。
  */
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -46,7 +46,7 @@ interface ApplyPatchArgs {
   input: string;
 }
 
-/** 绝对路径直接使用；相对路径相对 cwd（默认进程当前目录）解析。无端点级「工作区根」限制。 */
+/** 绝对路径直接使用；相对路径相对 cwd（默认进程当前目录）解析。无肢体级「工作区根」限制。 */
 function resolvePatchPath(filePath: string, cwd: string): string {
   const raw = filePath.trim();
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(cwd, raw);

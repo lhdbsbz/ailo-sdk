@@ -32,18 +32,6 @@ interface ReadFileArgs {
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
-function inferMime(ext: string): string {
-  const map: Record<string, string> = {
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    svg: "image/svg+xml",
-  };
-  return map[ext] || "application/octet-stream";
-}
-
 async function readFile(args: Args): Promise<string | ContentPart[]> {
   const validated = validateArgs<ReadFileArgs>(args, {
     path: { type: "string", required: true },

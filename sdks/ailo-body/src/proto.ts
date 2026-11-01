@@ -120,16 +120,8 @@ export type ContentPart =
   | { type: 'blob'; id: string; mime?: string; name?: string; size?: number }
   | { type: 'url'; url: string; mime?: string; name?: string }
 
-export function textPart(text: string): ContentPart {
-  return { type: 'text', text }
-}
-
 export function blobPart(blob: { id: string; mime?: string; name?: string; size?: number }): ContentPart {
   return { type: 'blob', ...blob }
-}
-
-export function urlPart(url: string, extra?: { mime?: string; name?: string }): ContentPart {
-  return { type: 'url', url, ...extra }
 }
 
 export function isContentPart(value: unknown): value is ContentPart {
